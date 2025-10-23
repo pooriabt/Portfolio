@@ -1,4 +1,4 @@
-// components/DoorScene.jsx
+// components/DoorScene.tsx
 "use client";
 import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
@@ -13,108 +13,74 @@ export default function DoorScene() {
 
     // ----- Scene / Camera / Renderer -----
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xf0f0f6);
+    scene.background = new THREE.Color("transparent");
 
-    const width = mount.clientWidth;
-    const height = mount.clientHeight;
+    const width = mount.clientWidth || window.innerWidth;
+    const height = mount.clientHeight || window.innerHeight;
 
-    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
-    camera.position.set(0, 1.6, 4); // slightly above ground, pulled back
+    const fov = 45;
+    const camera = new THREE.PerspectiveCamera(fov, width / height, 0.1, 100);
+    // We'll place camera on z-axis and look at origin so world center is screen center
+    camera.position.set(0, 0, 4.5); // initial camera distance (tweakable)
+    camera.lookAt(0, 0, 0);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     mount.appendChild(renderer.domElement);
 
     // ----- Lights -----
-    const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 0.7);
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 0.8);
     hemi.position.set(0, 10, 0);
     scene.add(hemi);
 
-    const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+    const dir = new THREE.DirectionalLight(0xffffff, 0.6);
     dir.position.set(5, 10, 7);
-    dir.castShadow = true;
     scene.add(dir);
 
-    // ----- Floor plane so door has reference (optional, subtle) -----
-    const planeGeo = new THREE.PlaneGeometry(20, 20);
-    const planeMat = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      metalness: 0,
-      roughness: 1,
-    });
-    const floor = new THREE.Mesh(planeGeo, planeMat);
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.y = 0;
-    scene.add(floor);
+    // ----- Door base "logical" size (world units). We'll scale this based on viewport -----
+    const baseDoorWidth = 1; // base geometry width (units)
+    const baseDoorHeight = 2; // base geometry height (units)
+    const baseDoorDepth = 0.05;
 
-    // ----- Door pivot trick -----
-    // We'll create a pivot Object3D at the hinge location (left edge).
-    // The door mesh will be positioned relative to the pivot so rotation looks like a real hinge.
-
-    // Door parameters
-    const doorWidth = 1; // units
-    const doorHeight = 2; // units
-    const doorDepth = 0.05;
-
-    // Pivot at origin (0,0,0). We'll place pivot at x = -doorWidth/2 so hinge sits at that x
-    // (you can choose pivot coordinates differently; this approach keeps pivot at scene origin).
+    // pivot will be parent of doorMesh and located at hinge world position.
     const pivot = new THREE.Object3D();
-    pivot.position.set(0, doorHeight / 2, 0); // place pivot at the vertical middle of door base height
+    // We'll place pivot at z = 0, x/y will be set by the centering function.
+    pivot.position.set(0, 0, 0);
     scene.add(pivot);
 
-    // Door geometry is centered on its local origin. To make hinge at left edge,
-    // we shift the door mesh to the right by doorWidth/2 relative to pivot.
-    const doorGeo = new THREE.BoxGeometry(doorWidth, doorHeight, doorDepth);
+    // Create door geometry (centered at its local origin)
+    // Using BoxGeometry centered at origin, we'll position it relative to pivot so the left edge sits at pivot.x
+    const doorGeo = new THREE.BoxGeometry(
+      baseDoorWidth,
+      baseDoorHeight,
+      baseDoorDepth
+    );
     const doorMat = new THREE.MeshStandardMaterial({
       color: 0x885544,
       roughness: 0.6,
     });
     const doorMesh = new THREE.Mesh(doorGeo, doorMat);
 
-    // shift the door so its left edge is at x = 0 in pivot-local coordinates
-    doorMesh.position.x = doorWidth / 2; // move right so left edge lines up with pivot's x=0
-    doorMesh.position.y = -doorHeight / 2; // because pivot y is at door top center; align base at y=0
-    // Slightly raise so bottom sits on floor (if pivot y chosen differently adjust)
-    doorMesh.position.y += 0; // tweak if needed
-
-    // Optionally add a simple handle (sphere)
+    // Handle (small sphere)
     const handleGeo = new THREE.SphereGeometry(0.03, 12, 12);
     const handleMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
     const handle = new THREE.Mesh(handleGeo, handleMat);
-    handle.position.set(
-      doorWidth - 0.15,
-      doorMesh.position.y,
-      doorDepth / 2 + 0.02
-    );
+    // We'll add handle later once we compute final sizes
+    // Add door mesh to pivot
+    pivot.add(doorMesh);
     doorMesh.add(handle);
 
-    pivot.add(doorMesh);
-
-    // ----- Raycaster for click detection -----
+    // Raycaster for clicks
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
 
     let isOpen = false;
     let animating = false;
 
-    function onPointerDown(event: { clientX: number; clientY: number }) {
-      // compute pointer normalized device coords (-1 to +1) relative to renderer DOM element
-      const rect = renderer.domElement.getBoundingClientRect();
-      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-      raycaster.setFromCamera(pointer, camera);
-
-      const intersects = raycaster.intersectObject(doorMesh, true);
-      if (intersects.length > 0 && !animating) {
-        toggleDoor();
-      }
-    }
-
     function toggleDoor() {
       animating = true;
       const from = { rotY: pivot.rotation.y };
-      // open to -Math.PI/2 (90 degrees) or close to 0
       const to = { rotY: isOpen ? 0 : -Math.PI / 2 };
       gsap.to(from, {
         rotY: to.rotY,
@@ -130,8 +96,93 @@ export default function DoorScene() {
       });
     }
 
+    function onPointerDown(event: PointerEvent) {
+      // compute normalized device coords (-1 to +1) relative to renderer DOM element
+      const rect = renderer.domElement.getBoundingClientRect();
+      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+
+      const intersects = raycaster.intersectObject(doorMesh, true);
+      if (intersects.length > 0 && !animating) {
+        toggleDoor();
+      }
+    }
+
     renderer.domElement.style.cursor = "pointer";
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
+
+    // ----- Centering & responsive sizing logic -----
+    // We'll compute a scale factor so the door occupies `viewportFraction` of the view height.
+    // The camera frustum height at the door distance is: frustumHeight = 2 * distance * tan(fov/2)
+    // desiredDoorHeight = frustumHeight * viewportFraction
+    const viewportFraction = 0.45; // door height will be ~45% of the visible height (tweakable)
+
+    // tune these
+    const viewportFractionHeight = 0.45; // portion of visible height the door should occupy
+    const viewportFractionWidth = 0.6; // portion of visible width the door may occupy
+    const minCameraZ = 3.0;
+    const maxCameraZ = 6.5; // camera will interpolate between min and max based on aspect ratio clamp
+
+    function updateDoorSizing() {
+      // Recompute renderer/camera sizes first
+      const w = mount.clientWidth || window.innerWidth;
+      const h = mount.clientHeight || window.innerHeight;
+      renderer.setSize(w, h);
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+
+      // distance from camera to pivot (we keep pivot.z === 0)
+      const distance = Math.abs(camera.position.z - pivot.position.z);
+
+      // vertical frustum height at that distance
+      const vFOV = (camera.fov * Math.PI) / 180; // vertical fov in radians
+      const frustumHeight = 2 * distance * Math.tan(vFOV / 2);
+
+      // horizontal frustum width at that distance
+      const frustumWidth = frustumHeight * (w / h);
+
+      // desired world-space sizes
+      const desiredDoorHeight = frustumHeight * viewportFractionHeight;
+      const desiredDoorWidth = frustumWidth * viewportFractionWidth;
+
+      // compute uniform scales for each axis relative to base sizes
+      const scaleFromHeight = desiredDoorHeight / baseDoorHeight;
+      const scaleFromWidth = desiredDoorWidth / baseDoorWidth;
+
+      // choose the smaller scale so door fits both width and height
+      const scale = Math.min(scaleFromHeight, scaleFromWidth);
+
+      // Apply scale to the door mesh (uniform)
+      doorMesh.scale.set(scale, scale, scale);
+
+      // Now position pivot and doorMesh so the door center sits at world origin (0,0,0)
+      const halfWidthScaled = (baseDoorWidth / 2) * scale;
+
+      pivot.position.x = -halfWidthScaled;
+      pivot.position.y = 0; // center vertically
+      pivot.position.z = 0;
+
+      doorMesh.position.x = halfWidthScaled;
+      doorMesh.position.y = 0;
+      doorMesh.position.z = 0;
+
+      // Handle
+      const handleX = baseDoorWidth / 2 - 0.12;
+      handle.position.set(handleX, 0, baseDoorDepth / 2 + 0.03);
+
+      // Optional: adjust camera z for narrow viewports
+      // We'll compute a "narrowness" factor: 1 when very tall/narrow, 0 when wide.
+      const aspect = w / h;
+      const narrowness = Math.max(0, 1.0 - Math.min(aspect, 1.2) / 1.2); // tweak 1.2 as threshold
+      // Interpolate camera z between minCameraZ and maxCameraZ when narrowness grows
+      const targetCameraZ = minCameraZ + (maxCameraZ - minCameraZ) * narrowness;
+      camera.position.z = targetCameraZ;
+      camera.updateProjectionMatrix();
+    }
+
+    // initial sizing
+    updateDoorSizing();
 
     // ----- Animation loop -----
     const clock = new THREE.Clock();
@@ -139,37 +190,32 @@ export default function DoorScene() {
     function animate() {
       rafId = requestAnimationFrame(animate);
       const delta = clock.getDelta();
-      // any subtle animation can go here
       renderer.render(scene, camera);
     }
     animate();
 
-    // ----- Handle Resize -----
+    // Handle resize: update renderer + camera + door sizing
     function onResize() {
-      camera.aspect = width / height;
-      camera.updateProjectionMatrix();
-      renderer.setSize(width, height);
+      updateDoorSizing();
     }
     window.addEventListener("resize", onResize);
 
-    // Clean up on unmount
+    // Clean up
     return () => {
       cancelAnimationFrame(rafId);
       renderer.domElement.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("resize", onResize);
+
       mount.removeChild(renderer.domElement);
 
-      // dispose geometry/materials
       doorGeo.dispose();
       doorMat.dispose();
-      handleGeo.dispose();
-      handleMat.dispose();
-      planeGeo.dispose();
-      planeMat.dispose();
+      handleGeo.dispose && (handleGeo as any).dispose && handleGeo.dispose(); // guard
+      handleMat.dispose && (handleMat as any).dispose && handleMat.dispose();
 
-      // dispose renderer
       renderer.dispose();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // container fills available space — style externally
