@@ -3,6 +3,7 @@
 import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { gsap } from "gsap";
+import createDigitalRainMaterial from "./shaders/DigitalRain";
 
 export default function DoorScene() {
   const mountRef = useRef<HTMLDivElement | null>(null);
@@ -13,7 +14,7 @@ export default function DoorScene() {
 
     // ----- Scene / Camera / Renderer -----
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color("transparent");
+    // scene.background = new THREE.Color("transparent");
 
     const width = mount.clientWidth || window.innerWidth;
     const height = mount.clientHeight || window.innerHeight;
@@ -26,7 +27,57 @@ export default function DoorScene() {
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
     mount.appendChild(renderer.domElement);
+
+    // immediately set resolution from renderer canvas (device pixels)
+    const canvas = renderer.domElement;
+    console.log(
+      "canvas (pixels) initial:",
+      canvas.width,
+      canvas.height,
+      "client:",
+      mount.clientWidth,
+      mount.clientHeight
+    );
+
+    const doorMat = createDigitalRainMaterial();
+
+    if (
+      doorMat &&
+      (doorMat as any).uniforms &&
+      (doorMat as any).uniforms.uResolution
+    ) {
+      (doorMat as any).uniforms.uResolution.value.set(
+        canvas.width,
+        canvas.height
+      );
+    }
+
+    // TEMP DEBUG: make shader easier to see while tuning
+    // (we'll switch back to AdditiveBlending later)
+    doorMat.transparent = true;
+    doorMat.depthWrite = false;
+    doorMat.depthTest = true;
+    doorMat.blending = THREE.CustomBlending;
+    doorMat.blendEquation = THREE.AddEquation;
+    doorMat.blendSrc = THREE.SrcAlphaFactor;
+    doorMat.blendDst = THREE.OneFactor;
+    doorMat.needsUpdate = true;
+
+    // make it brighter while debugging
+    if ((doorMat as any).uniforms?.uGlow)
+      (doorMat as any).uniforms.uGlow.value = 2.0;
+    if ((doorMat as any).uniforms?.uColor)
+      (doorMat as any).uniforms.uColor.value.setHex(0x00ff88);
+    console.log(
+      "doorMat uniforms after init:",
+      Object.keys((doorMat as any).uniforms)
+    );
+    console.log(
+      "uResolution after init:",
+      (doorMat as any).uniforms.uResolution.value.toArray()
+    );
 
     // ----- Lights -----
     const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 0.85);
@@ -53,10 +104,23 @@ export default function DoorScene() {
       baseDoorHeight,
       baseDoorDepth
     );
-    const doorMat = new THREE.MeshStandardMaterial({
-      color: 0x885544,
-      roughness: 0.6,
-    });
+    console.log(
+      "doorMat isShader:",
+      !!(doorMat && (doorMat as any).isShaderMaterial)
+    );
+    console.log(
+      "doorMat.uniforms keys:",
+      doorMat?.uniforms ? Object.keys(doorMat.uniforms) : "no-uniforms"
+    );
+    if (doorMat?.uniforms?.uResolution) {
+      console.log(
+        "initial uResolution:",
+        doorMat.uniforms.uResolution.value.toArray()
+      );
+    }
+    if (doorMat?.uniforms?.uColor) {
+      console.log("uColor:", doorMat.uniforms.uColor.value.getHexString());
+    }
 
     const leftDoor = new THREE.Mesh(doorGeo, doorMat);
     const rightDoor = new THREE.Mesh(doorGeo, doorMat);
@@ -281,6 +345,8 @@ export default function DoorScene() {
     const clock = new THREE.Clock();
     let rafId: number;
     function animate() {
+      const elapsed = clock.getElapsedTime();
+      doorMat.uniforms.uTime.value = elapsed;
       rafId = requestAnimationFrame(animate);
       renderer.render(scene, camera);
     }
