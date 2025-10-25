@@ -4,6 +4,7 @@ import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { gsap } from "gsap";
 import createDigitalRainMaterial from "./shaders/DigitalRain";
+import ArchDoor from "./ArchDoor";
 
 export default function DoorScene() {
   const mountRef = useRef<HTMLDivElement | null>(null);
@@ -42,6 +43,7 @@ export default function DoorScene() {
     );
 
     const doorMat = createDigitalRainMaterial();
+    // const doorMat1 = ArchDoor();
 
     if (
       doorMat &&
