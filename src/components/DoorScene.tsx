@@ -4,7 +4,10 @@ import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { gsap } from "gsap";
 import createDigitalRainMaterial from "./shaders/DigitalRain";
-import ArchDoor from "./ArchDoor";
+import { createArchDoorCanvas } from "./archdoorCanvas";
+import imgA from "../assets/perse.png";
+import imgB from "../assets/ring.png";
+import imgC from "../assets/arch-tools.png";
 
 export default function DoorScene() {
   const mountRef = useRef<HTMLDivElement | null>(null);
@@ -13,173 +16,95 @@ export default function DoorScene() {
     const mount = mountRef.current;
     if (!mount) return;
 
-    // ----- Scene / Camera / Renderer -----
+    // ---------- basic scene / camera / renderer ----------
     const scene = new THREE.Scene();
-    // scene.background = new THREE.Color("transparent");
-
     const width = mount.clientWidth || window.innerWidth;
     const height = mount.clientHeight || window.innerHeight;
 
-    const fov = 45;
-    const camera = new THREE.PerspectiveCamera(fov, width / height, 0.1, 100);
+    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
     camera.position.set(0, 0, 4.8);
-    camera.lookAt(0, 0, 0);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-
+    renderer.setClearColor(0x000000, 0); // transparent
     mount.appendChild(renderer.domElement);
 
-    // immediately set resolution from renderer canvas (device pixels)
-    const canvas = renderer.domElement;
-    console.log(
-      "canvas (pixels) initial:",
-      canvas.width,
-      canvas.height,
-      "client:",
-      mount.clientWidth,
-      mount.clientHeight
-    );
-
-    const doorMat = createDigitalRainMaterial();
-    // const doorMat1 = ArchDoor();
-
-    if (
-      doorMat &&
-      (doorMat as any).uniforms &&
-      (doorMat as any).uniforms.uResolution
-    ) {
-      (doorMat as any).uniforms.uResolution.value.set(
-        canvas.width,
-        canvas.height
-      );
-    }
-
-    // TEMP DEBUG: make shader easier to see while tuning
-    // (we'll switch back to AdditiveBlending later)
-    doorMat.transparent = true;
-    doorMat.depthWrite = false;
-    doorMat.depthTest = true;
-    doorMat.blending = THREE.CustomBlending;
-    doorMat.blendEquation = THREE.AddEquation;
-    doorMat.blendSrc = THREE.SrcAlphaFactor;
-    doorMat.blendDst = THREE.OneFactor;
-    doorMat.needsUpdate = true;
-
-    // make it brighter while debugging
-    if ((doorMat as any).uniforms?.uGlow)
-      (doorMat as any).uniforms.uGlow.value = 2.0;
-    if ((doorMat as any).uniforms?.uColor)
-      (doorMat as any).uniforms.uColor.value.setHex(0x00ff88);
-    console.log(
-      "doorMat uniforms after init:",
-      Object.keys((doorMat as any).uniforms)
-    );
-    console.log(
-      "uResolution after init:",
-      (doorMat as any).uniforms.uResolution.value.toArray()
-    );
-
-    // ----- Lights -----
-    const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 0.85);
-    hemi.position.set(0, 10, 0);
-    scene.add(hemi);
-
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 0.85));
     const dir = new THREE.DirectionalLight(0xffffff, 0.6);
     dir.position.set(5, 10, 7);
     scene.add(dir);
 
-    // ----- Base door metrics (in world units) -----
-    const baseDoorWidth = 1; // base geometry width
-    const baseDoorHeight = 2; // base geometry height
+    // ---------- geometry / pivots ----------
+    const baseDoorWidth = 1;
+    const baseDoorHeight = 2;
     const baseDoorDepth = 0.05;
-    const baseGap = 0.25; // gap between doors (in same base units)
+    const baseGap = 0.25;
 
-    // Create pivots & door meshes (left and right)
     const leftPivot = new THREE.Object3D();
     const rightPivot = new THREE.Object3D();
     scene.add(leftPivot, rightPivot);
 
-    const doorGeo = new THREE.BoxGeometry(
+    // create a single "base" box geometry and keep it unmodified
+    const baseGeo = new THREE.BoxGeometry(
       baseDoorWidth,
       baseDoorHeight,
       baseDoorDepth
     );
-    console.log(
-      "doorMat isShader:",
-      !!(doorMat && (doorMat as any).isShaderMaterial)
-    );
-    console.log(
-      "doorMat.uniforms keys:",
-      doorMat?.uniforms ? Object.keys(doorMat.uniforms) : "no-uniforms"
-    );
-    if (doorMat?.uniforms?.uResolution) {
-      console.log(
-        "initial uResolution:",
-        doorMat.uniforms.uResolution.value.toArray()
-      );
-    }
-    if (doorMat?.uniforms?.uColor) {
-      console.log("uColor:", doorMat.uniforms.uColor.value.getHexString());
-    }
 
-    const leftDoor = new THREE.Mesh(doorGeo, doorMat);
-    const rightDoor = new THREE.Mesh(doorGeo, doorMat);
-    // Name them so it's easier to debug in inspector
+    // ---------- materials ----------
+    // shader (right door)
+    const rainMat = createDigitalRainMaterial();
+    rainMat.transparent = true;
+    rainMat.depthWrite = false;
+    rainMat.blending = THREE.AdditiveBlending;
+    if (rainMat.uniforms?.uGlow) rainMat.uniforms.uGlow.value = 1.2;
+
+    // placeholder left material (will become canvas-texture later)
+    let leftDoorMat: THREE.MeshStandardMaterial | null =
+      new THREE.MeshStandardMaterial({
+        color: 0x222222,
+        transparent: true,
+        // side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+
+    // ---------- create meshes (clone geometry for independence) ----------
+    const leftDoor = new THREE.Mesh(baseGeo.clone(), leftDoorMat);
+    const rightDoor = new THREE.Mesh(baseGeo.clone(), rainMat);
     leftDoor.name = "leftDoor";
     rightDoor.name = "rightDoor";
+
+    // Note: DO NOT flip UVs globally here. We keep base geometry UVs unchanged.
 
     // handles
     const handleGeo = new THREE.SphereGeometry(0.03, 12, 12);
     const handleMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
     const leftHandle = new THREE.Mesh(handleGeo, handleMat);
     const rightHandle = new THREE.Mesh(handleGeo, handleMat);
-
     leftDoor.add(leftHandle);
     rightDoor.add(rightHandle);
 
     leftPivot.add(leftDoor);
     rightPivot.add(rightDoor);
 
-    // Raycaster for clicks
-    const raycaster = new THREE.Raycaster();
-    const pointer = new THREE.Vector2();
+    // ---------- click / open logic (unchanged) ----------
+    let leftOpen = false,
+      rightOpen = false,
+      animLeft = false,
+      animRight = false;
 
-    // state
-    let leftOpen = false;
-    let rightOpen = false;
-    let animatingLeft = false;
-    let animatingRight = false;
-
-    // utility: determine whether the intersected object belongs to left or right door
-    function doorFromIntersected(
-      obj: THREE.Object3D | null
-    ): "left" | "right" | null {
-      let o: THREE.Object3D | null = obj;
-      while (o) {
-        if (o === leftDoor) return "left";
-        if (o === rightDoor) return "right";
-        o = o.parent;
-      }
-      return null;
-    }
-
-    // utility: compute world position of a mesh (cloneless)
     const tmpVec = new THREE.Vector3();
     function worldPosOf(obj: THREE.Object3D, target: THREE.Vector3) {
       obj.getWorldPosition(target);
       return target;
     }
 
-    // Decide which rotation (+90 or -90) will push the door farther from camera
     function chooseOpenTarget(pivot: THREE.Object3D, door: THREE.Mesh) {
       const original = pivot.rotation.y;
       const candidates = [-Math.PI / 2, Math.PI / 2];
-
-      let best = candidates[0];
-      let bestDist = -Infinity;
-
+      let best = candidates[0],
+        bestDist = -Infinity;
       for (const cand of candidates) {
         pivot.rotation.y = cand;
         const pos = worldPosOf(door, tmpVec);
@@ -189,11 +114,11 @@ export default function DoorScene() {
           best = cand;
         }
       }
-      pivot.rotation.y = original; // restore
+      pivot.rotation.y = original;
       return best;
     }
 
-    function toggleDoor(
+    function tweenPivot(
       pivot: THREE.Object3D,
       door: THREE.Mesh,
       isOpen: boolean,
@@ -203,16 +128,10 @@ export default function DoorScene() {
     ) {
       if (animFlag) return;
       setAnimating(true);
-
       const from = { rotY: pivot.rotation.y };
-
-      // choose the open rotation that pushes door away from camera
-      const openTarget = chooseOpenTarget(pivot, door);
-
-      const toAngle = isOpen ? 0 : openTarget;
-
+      const target = isOpen ? 0 : chooseOpenTarget(pivot, door);
       gsap.to(from, {
-        rotY: toAngle,
+        rotY: target,
         duration: 1.0,
         ease: "power3.out",
         onUpdate: () => {
@@ -226,153 +145,176 @@ export default function DoorScene() {
     }
 
     function toggleLeft() {
-      toggleDoor(
+      tweenPivot(
         leftPivot,
         leftDoor,
         leftOpen,
         (v) => (leftOpen = v),
-        (v) => (animatingLeft = v),
-        animatingLeft
+        (v) => (animLeft = v),
+        animLeft
       );
     }
-
     function toggleRight() {
-      toggleDoor(
+      tweenPivot(
         rightPivot,
         rightDoor,
         rightOpen,
         (v) => (rightOpen = v),
-        (v) => (animatingRight = v),
-        animatingRight
+        (v) => (animRight = v),
+        animRight
       );
+    }
+
+    function doorFromIntersected(obj: THREE.Object3D | null) {
+      while (obj) {
+        if (obj === leftDoor) return "left";
+        if (obj === rightDoor) return "right";
+        obj = obj.parent;
+      }
+      return null;
     }
 
     function onPointerDown(event: PointerEvent) {
       const rect = renderer.domElement.getBoundingClientRect();
+      const pointer = new THREE.Vector2();
       pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
       pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      const raycaster = new THREE.Raycaster();
       raycaster.setFromCamera(pointer, camera);
-
-      // intersect both doors (and their children)
       const intersects = raycaster.intersectObjects(
         [leftDoor, rightDoor],
         true
       );
-      if (intersects.length === 0) return;
-
-      const first = intersects[0];
-      const which = doorFromIntersected(first.object);
-      if (which === "left") {
-        toggleLeft();
-      } else if (which === "right") {
-        toggleRight();
-      }
+      if (!intersects.length) return;
+      const which = doorFromIntersected(intersects[0].object);
+      if (which === "left") toggleLeft();
+      if (which === "right") toggleRight();
     }
-
     renderer.domElement.style.cursor = "pointer";
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
 
-    // ----- Responsive sizing & positioning for two doors -----
-    const viewportFractionHeight = 0.5; // how much of vertical space the doors can take (tweak)
-    const viewportFractionWidth = 0.75; // how much of horizontal space the pair can take (tweak)
-    const minScale = 0.2; // avoid vanishing on extremely tiny viewports
-    const maxScale = 3.0;
-
+    // ---------- sizing ----------
     function updateSizing() {
-      if (!mount) return;
-      const w = mount.clientWidth || window.innerWidth;
-      const h = mount.clientHeight || window.innerHeight;
-      renderer.setSize(w, h);
-      camera.aspect = w / h;
+      renderer.setSize(width, height);
+      camera.aspect = width / height;
       camera.updateProjectionMatrix();
 
-      const distance = Math.abs(camera.position.z - 0); // pivots at z=0
+      const distance = Math.abs(camera.position.z);
       const vFOV = (camera.fov * Math.PI) / 180;
       const frustumHeight = 2 * distance * Math.tan(vFOV / 2);
-      const frustumWidth = frustumHeight * (w / h);
+      const frustumWidth = frustumHeight * (width / height);
 
-      // available width for both doors + gap
+      const viewportFractionHeight = 0.5;
+      const viewportFractionWidth = 0.75;
+      const minScale = 0.2;
+      const maxScale = 3.0;
+
       const availableWidth = frustumWidth * viewportFractionWidth;
-
-      const denom = 2 * baseDoorWidth + baseGap; // in base units
+      const denom = 2 * baseDoorWidth + baseGap;
       const scaleFromWidth = availableWidth / denom;
-
-      const desiredDoorHeight = frustumHeight * viewportFractionHeight;
-      const scaleFromHeight = desiredDoorHeight / baseDoorHeight;
-
+      const scaleFromHeight =
+        (frustumHeight * viewportFractionHeight) / baseDoorHeight;
       let scale = Math.min(scaleFromWidth, scaleFromHeight);
       scale = Math.max(minScale, Math.min(maxScale, scale));
 
-      // compute scaled sizes
       const doorWidthScaled = baseDoorWidth * scale;
-      const doorHeightScaled = baseDoorHeight * scale;
+      const halfWidth = doorWidthScaled / 2;
       const gapScaled = baseGap * scale;
-      const halfTotalWidth = (2 * doorWidthScaled + gapScaled) / 2;
-
-      // centers for left and right door
       const leftCenterX = -(gapScaled / 2 + doorWidthScaled / 2);
       const rightCenterX = gapScaled / 2 + doorWidthScaled / 2;
 
-      // For left door: hinge (pivot) should be at left edge of door -> pivot.x = centerX - halfWidthScaled
-      const halfWidth = doorWidthScaled / 2;
+      // pivot positions & door local centers (note: door.position set relative to pivot)
       leftPivot.position.set(leftCenterX - halfWidth, 0, 0);
-      leftDoor.position.set(halfWidth, 0, 0); // door local center relative to pivot
+      leftDoor.position.set(halfWidth, 0, 0);
       leftDoor.scale.set(scale, scale, scale);
 
-      // For right door: hinge at right edge -> pivot.x = centerX + halfWidthScaled
       rightPivot.position.set(rightCenterX + halfWidth, 0, 0);
-      // NOTE: door local center is at positive X by default; for right door we want pivot to be on the right edge,
-      // so set door.position.x to -halfWidth so door center sits at centerX.
       rightDoor.position.set(-halfWidth, 0, 0);
       rightDoor.scale.set(scale, scale, scale);
 
-      // handles relative to base door coords (child of each door mesh)
       const handleXBase = baseDoorWidth / 2 - 0.12;
       leftHandle.position.set(handleXBase, 0, baseDoorDepth / 2 + 0.03);
       rightHandle.position.set(-handleXBase, 0, baseDoorDepth / 2 + 0.03);
 
-      // small camera nudge on very narrow aspect ratios (optional)
-      const aspect = w / h;
-      const narrowness = Math.max(0, 1 - Math.min(aspect, 1.2) / 1.2);
-      const minCameraZ = 3.2;
-      const maxCameraZ = 6.0;
-      camera.position.z = minCameraZ + (maxCameraZ - minCameraZ) * narrowness;
+      camera.position.z =
+        3.2 +
+        (6.0 - 3.2) * Math.max(0, 1 - Math.min(width / height, 1.2) / 1.2);
       camera.updateProjectionMatrix();
+
+      // update shader resolution (pixel)
+      if (rainMat.uniforms?.uResolution) {
+        rainMat.uniforms.uResolution.value.set(
+          renderer.domElement.width,
+          renderer.domElement.height
+        );
+      }
+    }
+    updateSizing();
+    window.addEventListener("resize", updateSizing);
+
+    // ---------- create and assign canvas texture for left door ----------
+    let archController: ReturnType<typeof createArchDoorCanvas> | null = null;
+    let archTexture: THREE.CanvasTexture | null = null;
+
+    try {
+      // create controller
+      archController = createArchDoorCanvas(
+        [imgA.src, imgB.src, imgC.src],
+        1024,
+        2048,
+        () => {
+          if (archTexture) archTexture.needsUpdate = true;
+        }
+      );
+
+      archController.start?.();
+
+      archTexture = new THREE.CanvasTexture(archController.canvas);
+
+      archTexture.minFilter = THREE.LinearFilter;
+      archTexture.magFilter = THREE.LinearFilter;
+
+      const mat = new THREE.MeshStandardMaterial({
+        map: archTexture,
+        transparent: true,
+        // side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+
+      if (leftDoorMat) leftDoorMat.dispose();
+      leftDoorMat = mat;
+      leftDoor.material = leftDoorMat;
+    } catch (err) {
+      console.error("Failed to create arch canvas texture:", err);
     }
 
-    // initial sizing
-    updateSizing();
-
-    // ----- Animation loop -----
+    // ---------- animate ----------
     const clock = new THREE.Clock();
-    let rafId: number;
+    let rafId = 0;
     function animate() {
       const elapsed = clock.getElapsedTime();
-      doorMat.uniforms.uTime.value = elapsed;
+      if (rainMat.uniforms?.uTime) rainMat.uniforms.uTime.value = elapsed;
       rafId = requestAnimationFrame(animate);
       renderer.render(scene, camera);
     }
     animate();
 
-    // resize listener
-    function onResize() {
-      updateSizing();
-    }
-    window.addEventListener("resize", onResize);
-
-    // cleanup
+    // ---------- cleanup ----------
     return () => {
       cancelAnimationFrame(rafId);
       renderer.domElement.removeEventListener("pointerdown", onPointerDown);
-      window.removeEventListener("resize", onResize);
-      if (mount && renderer.domElement.parentElement === mount) {
+      window.removeEventListener("resize", updateSizing);
+      if (mount && renderer.domElement.parentElement === mount)
         mount.removeChild(renderer.domElement);
-      }
 
-      doorGeo.dispose();
-      doorMat.dispose();
+      if (archController) archController.stop?.();
+      if (archTexture) archTexture.dispose();
+      if (leftDoorMat) leftDoorMat.dispose();
+
+      baseGeo.dispose();
       handleGeo.dispose();
       handleMat.dispose();
+      rainMat.dispose();
       renderer.dispose();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -381,12 +323,8 @@ export default function DoorScene() {
   return (
     <div
       ref={mountRef}
-      style={{
-        width: "100%",
-        height: "100vh",
-        touchAction: "none",
-        display: "block",
-      }}
+      style={{ width: "100%", height: "100vh", touchAction: "none" }}
     />
   );
 }
+//
