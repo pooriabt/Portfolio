@@ -49,25 +49,29 @@ export function createArchDoorCanvas(
     r: Math.max(80, Math.min(currentWidth, currentHeight) * 0.28) * 2.0,
   };
 
-  // positions of three images (match ArchDoor layout)
-  // Reduced sizes to prevent overflow
+  // ============================================================================
+  // #4 LOCATION: Where each PNG file is positioned in the door texture
+  // ============================================================================
+  // x, y = center position of each image (in canvas coordinates)
+  // Change these values to move PNG files around on the door texture
+  // positions[0] = top-left image, positions[1] = middle-right, positions[2] = bottom-left
   const positions = [
     {
-      x: 0.08 * currentWidth + (0.4 * currentWidth) / 2,
-      y: 0.08 * currentHeight,
-      w: 0.4 * currentWidth,
+      x: 0.7 * currentWidth,
+      y: 0.01 * currentHeight,
+      w: currentWidth * 0.5, // PNG width as fraction of canvas width (0.4 = 40% of canvas)
       anchor: "tl",
     },
     {
-      x: currentWidth - 0.06 * currentWidth - (0.45 * currentWidth) / 2,
-      y: 0.4 * currentHeight,
-      w: 0.45 * currentWidth,
+      x: currentWidth / 2,
+      y: 0.42 * currentHeight,
+      w: currentWidth,
       anchor: "tc",
     },
     {
-      x: 0.1 * currentWidth + (0.38 * currentWidth) / 2,
-      y: currentHeight - 0.08 * currentHeight,
-      w: 0.38 * currentWidth,
+      x: 0.75 * currentWidth,
+      y: currentHeight,
+      w: currentWidth * 0.75,
       anchor: "bl",
     },
   ];
@@ -75,7 +79,7 @@ export function createArchDoorCanvas(
   // Calculate influence of blob on a given position (matching ArchDoor.tsx)
   function influence(px: number, py: number): number {
     const d = Math.hypot(px - state.x, py - state.y);
-    const outer = state.r * 1.4;
+    const outer = state.r * 1;
     const t = Math.max(0, Math.min(1, d / outer));
     const s = 1 - t; // inside -> 1
     return s * s * (3 - 2 * s); // smoothstep
@@ -99,29 +103,57 @@ export function createArchDoorCanvas(
 
       // Apply opacity and blur based on influence (matching ArchDoor.tsx logic)
       const opacity = Math.max(0, Math.min(1, 1 - inf));
-      const blurPx = 6 * inf;
-      const scale = 1 - 0.06 * inf;
 
-      // Apply scale by adjusting dimensions
-      const scaledW = w * scale;
+      // ============================================================================
+      // #5 BLUR INTENSITY: How to change amount of blur intensity
+      // ============================================================================
+      // Change the multiplier (6) to adjust blur intensity
+      // Higher number = more blur, Lower number = less blur
+      const blurPx = 20 * inf; // <-- Change 6 to adjust blur intensity (e.g., 3 = less blur, 12 = more blur)
+
+      // ============================================================================
+      // #2 SCALE: Where to scale each PNG file (dynamic scaling based on blur distance)
+      // ============================================================================
+      // baseScale: scales DOWN when blob is nearby (blur effect)
+      // scaleUpWhenFar: scales UP when blob is far away (clear, no blur)
+      // Change 0.06 to adjust how much images shrink when blob is near
+      // Change 0.08 to adjust how much images grow when blob is far
+      const baseScale = 1 - 0.06 * inf; // <-- Change 0.06 to adjust shrinking near blob
+      const scaleUpWhenFar = 1 + (1 - inf) * 0.08; // <-- Change 0.08 to adjust growth when far (0.08 = 8% bigger)
+      const scale = baseScale * scaleUpWhenFar;
+
+      // ============================================================================
+      // #6 ROTATION AXIS: How to change rotation axis of each PNG file
+      // ============================================================================
+      // Currently rotating around Y-axis (vertical axis - like tilting forward/back)
+      // Change 0.15 to adjust rotation amount (more = more tilt)
+      // To change axis: modify ctx.rotate() line below
+      // - Remove ctx.rotate() = no rotation
+      // - Use rotationAngle = horizontal rotation
+      // - For different axes, apply different context transforms
+      const rotationAmount = (1 - inf) * 0.15; // <-- Change 0.15 to adjust rotation amount (radians)
+      const rotationAngle = Math.sin(Date.now() * 0.001 + i) * rotationAmount;
+
+      // Perspective scale for 3D effect
+      const perspectiveScale = Math.cos(rotationAngle);
+
+      // Apply scale by adjusting dimensions with perspective
+      const scaledW = w * scale * perspectiveScale;
       const scaledH = h * scale;
 
-      // Calculate position based on anchor
-      let drawX = 0;
-      let drawY = 0;
+      // Calculate position based on anchor for rotation center
+      let centerX = p.x;
+      let centerY = 0;
 
       if (i === 0) {
-        // Image A: top-left anchor
-        drawX = p.x - scaledW / 2;
-        drawY = p.y;
+        // Image A: top-left anchor - y is at top
+        centerY = p.y + scaledH / 2;
       } else if (i === 1) {
         // Image B: top-center anchor (centered vertically)
-        drawX = p.x - scaledW / 2;
-        drawY = p.y - scaledH / 2;
+        centerY = p.y;
       } else {
-        // Image C: bottom-left anchor
-        drawX = p.x - scaledW / 2;
-        drawY = p.y - scaledH;
+        // Image C: bottom-left anchor - y is at bottom
+        centerY = p.y - scaledH / 2;
       }
 
       ctx.save();
@@ -129,25 +161,40 @@ export function createArchDoorCanvas(
       if (blurPx > 0) {
         ctx.filter = `blur(${blurPx}px)`;
       }
-      ctx.drawImage(img, drawX, drawY, scaledW, scaledH);
+
+      // Apply rotation with perspective for 3D effect (left side comes out, right goes in)
+      ctx.translate(centerX, centerY);
+      // #6 ROTATION AXIS: This line controls rotation
+      // ctx.rotate(rotationAngle) = Y-axis rotation (current, tilting forward/back)
+      // To disable rotation: comment out this line
+      // To change to X-axis: use ctx.rotateX() or adjust calculations above
+      ctx.rotate(rotationAngle); // <-- This rotates around Z-axis (like a card spinning)
+      ctx.drawImage(img, -scaledW / 2, -scaledH / 2, scaledW, scaledH);
       ctx.restore();
     }
   }
 
-  // GSAP random walk
+  // ============================================================================
+  // #3 BLUR CIRCLE MOVEMENT: Where to determine how blur circles move on PNG files
+  // ============================================================================
+  // GSAP random walk animation controls the blob movement
   let tween: gsap.core.Tween | null = null;
   let stopped = false;
   const rand = (a: number, b: number) => Math.random() * (b - a) + a;
 
+  // Define the movement area for blur circles
   function area() {
     return {
-      minX: currentWidth * 0.08,
-      maxX: currentWidth * 0.92,
-      minY: currentHeight * 0.08,
-      maxY: currentHeight * 0.92,
+      // Change 0.08 and 0.92 to adjust movement boundaries
+      // 0.08 = 8% margin from edges, 0.92 = 92% of width (keeps blob away from edges)
+      minX: currentWidth * 0.08, // <-- Left boundary
+      maxX: currentWidth * 0.92, // <-- Right boundary
+      minY: currentHeight * 0.08, // <-- Top boundary
+      maxY: currentHeight * 0.92, // <-- Bottom boundary
     };
   }
 
+  // Controls how blob moves smoothly across the texture
   function step() {
     if (stopped) return;
     const a = area();
@@ -156,8 +203,10 @@ export function createArchDoorCanvas(
     tween = gsap.to(state, {
       x: target.x,
       y: target.y,
-      duration: rand(0.9, 1.4),
-      ease: "sine.inOut",
+      // Change rand(0.9, 1.4) to adjust movement speed
+      // Lower values = faster movement, Higher values = slower movement
+      duration: rand(0.9, 1.4), // <-- Change these to adjust movement duration (seconds)
+      ease: "sine.inOut", // <-- Change easing: "linear", "power2", "bounce", etc.
       onUpdate() {
         drawFrame();
         onUpdate?.();

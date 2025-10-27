@@ -8,6 +8,7 @@ import { createArchDoorCanvas } from "./archdoorCanvas";
 import imgA from "../assets/perse.png";
 import imgB from "../assets/ring.png";
 import imgC from "../assets/arch-tools.png";
+import { createSpiralBackground } from "./SpiralBackground";
 
 export default function DoorScene() {
   const mountRef = useRef<HTMLDivElement | null>(null);
@@ -45,6 +46,9 @@ export default function DoorScene() {
     const rightPivot = new THREE.Object3D();
     scene.add(leftPivot, rightPivot);
 
+    // Declare spiral early (will be initialized after doors are created)
+    let spiral: ReturnType<typeof createSpiralBackground> | null = null;
+
     // create a single "base" box geometry and keep it unmodified
     const baseGeo = new THREE.BoxGeometry(
       baseDoorWidth,
@@ -56,7 +60,7 @@ export default function DoorScene() {
     // shader (right door)
     const rainMat = createDigitalRainMaterial();
     rainMat.transparent = true;
-    rainMat.depthWrite = false;
+    rainMat.depthWrite = true;
     rainMat.blending = THREE.AdditiveBlending;
     if (rainMat.uniforms?.uGlow) rainMat.uniforms.uGlow.value = 1.2;
 
@@ -66,7 +70,7 @@ export default function DoorScene() {
         color: 0x222222,
         transparent: true,
         // side: THREE.DoubleSide,
-        depthWrite: false,
+        depthWrite: true,
       });
 
     // ---------- create meshes (clone geometry for independence) ----------
@@ -77,6 +81,55 @@ export default function DoorScene() {
 
     // Note: DO NOT flip UVs globally here. We keep base geometry UVs unchanged.
 
+    // Add edge geometry for door depth/edges (connecting front to back)
+    function addDoorEdges(
+      door: THREE.Mesh,
+      mat: THREE.MeshStandardMaterial | THREE.Material
+    ) {
+      const edges = new THREE.Group();
+
+      // Top edge - horizontal plane at top, facing forward
+      const topEdge = new THREE.Mesh(
+        new THREE.PlaneGeometry(baseDoorWidth, baseDoorDepth),
+        mat.clone()
+      );
+      topEdge.position.set(0, baseDoorHeight / 2, baseDoorDepth / 2 + 0.001);
+      edges.add(topEdge);
+
+      // Bottom edge - horizontal plane at bottom, facing forward
+      const bottomEdge = new THREE.Mesh(
+        new THREE.PlaneGeometry(baseDoorWidth, baseDoorDepth),
+        mat.clone()
+      );
+      bottomEdge.position.set(
+        0,
+        -baseDoorHeight / 2,
+        baseDoorDepth / 2 + 0.001
+      );
+      edges.add(bottomEdge);
+
+      // Left edge - vertical plane on left, facing forward
+      const leftEdge = new THREE.Mesh(
+        new THREE.PlaneGeometry(baseDoorDepth, baseDoorHeight),
+        mat.clone()
+      );
+      leftEdge.position.set(-baseDoorWidth / 2 - 0.001, 0, baseDoorDepth / 2);
+      leftEdge.rotation.y = Math.PI / 2;
+      edges.add(leftEdge);
+
+      // Right edge - vertical plane on right, facing forward
+      const rightEdge = new THREE.Mesh(
+        new THREE.PlaneGeometry(baseDoorDepth, baseDoorHeight),
+        mat.clone()
+      );
+      rightEdge.position.set(baseDoorWidth / 2 + 0.001, 0, baseDoorDepth / 2);
+      rightEdge.rotation.y = -Math.PI / 2;
+      edges.add(rightEdge);
+
+      door.add(edges);
+      return edges;
+    }
+
     // handles
     const handleGeo = new THREE.SphereGeometry(0.03, 12, 12);
     const handleMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
@@ -85,8 +138,24 @@ export default function DoorScene() {
     leftDoor.add(leftHandle);
     rightDoor.add(rightHandle);
 
+    // Add edges only for right door (left door edges are transparent - no edge mesh)
+    const rightDoorEdges = addDoorEdges(rightDoor, rainMat);
+
     leftPivot.add(leftDoor);
     rightPivot.add(rightDoor);
+
+    // Ensure doors render on top of spiral background
+    leftDoor.renderOrder = 999;
+    rightDoor.renderOrder = 999;
+
+    // create spiral background (after doors are created)
+    spiral = createSpiralBackground(
+      scene,
+      camera,
+      renderer,
+      leftDoor,
+      rightDoor
+    );
 
     // ---------- click / open logic (unchanged) ----------
     let leftOpen = false,
@@ -248,6 +317,9 @@ export default function DoorScene() {
           renderer.domElement.height
         );
       }
+
+      // update spiral background
+      if (spiral) spiral.resize();
     }
     updateSizing();
     window.addEventListener("resize", updateSizing);
@@ -259,7 +331,7 @@ export default function DoorScene() {
     try {
       // create controller
       archController = createArchDoorCanvas(
-        [imgA.src, imgB.src, imgC.src],
+        [imgC.src, imgA.src, imgB.src],
         1024,
         2048,
         () => {
@@ -284,6 +356,15 @@ export default function DoorScene() {
       if (leftDoorMat) leftDoorMat.dispose();
       leftDoorMat = mat;
       leftDoor.material = leftDoorMat;
+
+      // Update edge materials (left door has no edges - they're transparent)
+      // if (leftDoorEdges) {
+      //   leftDoorEdges.children.forEach((child) => {
+      //     if (child instanceof THREE.Mesh) {
+      //       child.material = mat.clone();
+      //     }
+      //   });
+      // }
     } catch (err) {
       console.error("Failed to create arch canvas texture:", err);
     }
@@ -293,6 +374,7 @@ export default function DoorScene() {
     let rafId = 0;
     function animate() {
       const elapsed = clock.getElapsedTime();
+      if (spiral) spiral.update(elapsed);
       if (rainMat.uniforms?.uTime) rainMat.uniforms.uTime.value = elapsed;
       rafId = requestAnimationFrame(animate);
       renderer.render(scene, camera);
@@ -316,6 +398,7 @@ export default function DoorScene() {
       handleMat.dispose();
       rainMat.dispose();
       renderer.dispose();
+      if (spiral) spiral.dispose();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
