@@ -145,8 +145,8 @@ export default function DoorScene() {
     rightPivot.add(rightDoor);
 
     // Ensure doors render on top of spiral background
-    leftDoor.renderOrder = 999;
-    rightDoor.renderOrder = 999;
+    // leftDoor.renderOrder = 999;
+    // rightDoor.renderOrder = 999;
 
     // create spiral background (after doors are created)
     spiral = createSpiralBackground(

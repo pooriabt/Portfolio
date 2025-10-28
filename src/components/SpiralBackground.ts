@@ -26,7 +26,7 @@ export function createSpiralBackground(
     },
     uCenter0: { value: new THREE.Vector2(0.25, 0.5) },
     uCenter1: { value: new THREE.Vector2(0.75, 0.5) },
-    uHoleRadius: { value: 0.08 },
+    uHoleRadius: { value: new THREE.Vector2(0.08, 0.08) },
     uSpeed: { value: 0.7 },
     uBands: { value: 20.0 },
     uContrast: { value: 1.0 },
@@ -43,72 +43,78 @@ export function createSpiralBackground(
 
   // fragment shader: two spirals, holes at centers, black/white bands
   const fragment = /* glsl */ `
-    precision highp float;
-    varying vec2 vUv;
-    uniform float uTime;
-    uniform vec2 uResolution;
-    uniform vec2 uCenter0;
-    uniform vec2 uCenter1;
-    uniform float uHoleRadius;
-    uniform float uSpeed;
-    uniform float uBands;
-    uniform float uContrast;
+  precision highp float;
+  varying vec2 vUv;
+  uniform float uTime;
+  uniform vec2 uResolution;
+  uniform vec2 uCenter0;
+  uniform vec2 uCenter1;
+  uniform vec2 uHoleRadius;   // now a vec2
+  uniform float uSpeed;
+  uniform float uBands;
+  uniform float uContrast;
 
-    void main() {
-      vec2 uv = gl_FragCoord.xy / uResolution;
-      float t = uTime * uSpeed;
-      
-      float aspect = uResolution.x / max(1.0, uResolution.y);
-      
-      // Calculate spiral from both centers
-      vec2 p0 = uv - uCenter0;
-      p0.x *= aspect;
-      float r0 = length(p0);
-      float a0 = atan(p0.y, p0.x);
-      float spiral0 = a0 + r0 * 6.0 - t * 0.7;
-      float v0 = sin(spiral0 * uBands);
-      
-      vec2 p1 = uv - uCenter1;
-      p1.x *= aspect;
-      float r1 = length(p1);
-      float a1 = atan(p1.y, p1.x);
-      float spiral1 = a1 + r1 * 6.0 - t * 0.7;
-      float v1 = sin(spiral1 * uBands);
-      
-      // Smoothly blend between spirals based on distance (smooth boundary)
-      float d0 = distance(uv, uCenter0);
-      float d1 = distance(uv, uCenter1);
-      
-      // Create smooth blend using inverse distance weighting
-      float blendDist = 0.2; // transition distance
-      float w0 = exp(-d0 / blendDist);
-      float w1 = exp(-d1 / blendDist);
-      float totalWeight = w0 + w1;
-      
-      // Blend the spiral values smoothly
-      float combined = (v0 * w0 + v1 * w1) / totalWeight;
-      
-      // Convert to bands
-      float band = smoothstep(0.0, 0.2, combined);
-      
-      // Recalculate distances for holes
-      d0 = distance(uv, uCenter0);
-      d1 = distance(uv, uCenter1);
-      
-      // Create holes at both centers by setting alpha to 0
-      float alpha = 1.0;
-      if (d0 < uHoleRadius) alpha = 0.0;
-      if (d1 < uHoleRadius) alpha = 0.0;
-      // Soft edges
-      alpha *= smoothstep(uHoleRadius, uHoleRadius + 0.02, d0);
-      alpha *= smoothstep(uHoleRadius, uHoleRadius + 0.02, d1);
+  void main() {
+    vec2 uv = gl_FragCoord.xy / uResolution;
+    float t = uTime * uSpeed;
+    
+    float aspect = uResolution.x / max(1.0, uResolution.y);
+    
+    // Calculate spiral from both centers
+    vec2 p0 = uv - uCenter0;
+    p0.x *= aspect;
+    float r0 = length(p0);
+    float a0 = atan(p0.y, p0.x);
+    float spiral0 = a0 + r0 * 6.0 - t * 0.7;
+    float v0 = sin(spiral0 * uBands);
+    
+    vec2 p1 = uv - uCenter1;
+    p1.x *= aspect;
+    float r1 = length(p1);
+    float a1 = atan(p1.y, p1.x);
+    float spiral1 = a1 + r1 * 6.0 - t * 0.7;
+    float v1 = sin(spiral1 * uBands);
+    
+    // Smoothly blend between spirals based on distance (smooth boundary)
+    float d0 = distance(uv, uCenter0);
+    float d1 = distance(uv, uCenter1);
+    
+    // Create smooth blend using inverse distance weighting
+    float blendDist = 0.2; // transition distance
+    float w0 = exp(-d0 / blendDist);
+    float w1 = exp(-d1 / blendDist);
+    float totalWeight = w0 + w1;
+    
+    // Blend the spiral values smoothly
+    float combined = (v0 * w0 + v1 * w1) / totalWeight;
+    
+    // Convert to bands
+    float band = smoothstep(0.0, 0.2, combined);
+    
+    // Elliptical holes (independent x/y scaling)
+    vec2 hp0 = uv - uCenter0;
+    hp0.x /= uHoleRadius.x;
+    hp0.y /= uHoleRadius.y;
+    float holeDist0 = length(hp0);
+    
+    vec2 hp1 = uv - uCenter1;
+    hp1.x /= uHoleRadius.x;
+    hp1.y /= uHoleRadius.y;
+    float holeDist1 = length(hp1);
 
-      // final color
-      vec3 color = mix(vec3(0.0), vec3(1.0), band);
+    float alpha = 1.0;
+    if (holeDist0 < 1.0) alpha = 0.0;
+    if (holeDist1 < 1.0) alpha = 0.0;
 
-      gl_FragColor = vec4(color, alpha);
-    }
-  `;
+    // Soft fade edges
+    alpha *= smoothstep(1.0, 1.02, holeDist0);
+    alpha *= smoothstep(1.0, 1.02, holeDist1);
+
+    // final color
+    vec3 color = mix(vec3(0.0), vec3(1.0), band);
+    gl_FragColor = vec4(color, alpha);
+  }
+`;
 
   const mat = new THREE.ShaderMaterial({
     vertexShader: vertex,
@@ -154,19 +160,17 @@ export function createSpiralBackground(
     uniforms.uCenter0.value.copy(c0);
     uniforms.uCenter1.value.copy(c1);
   }
-
   function resize() {
-    uniforms.uResolution.value.set(
-      renderer.domElement.width,
-      renderer.domElement.height
-    );
-    // optionally recompute hole radius relative to viewport width:
     const w = renderer.domElement.width;
-    // tune hole size so it matches door screen size roughly
-    uniforms.uHoleRadius.value = Math.max(
-      0.05,
-      Math.min(0.12, 120 / Math.max(1, w))
-    );
+    const h = renderer.domElement.height;
+    uniforms.uResolution.value.set(w, h);
+
+    // Compute independent width/height hole scaling
+    const holeWidth = Math.max(0.05, Math.min(0.17, 125 / Math.max(1, w)));
+    const holeHeight = Math.max(0.05, Math.min(0.5, 200 / Math.max(1, h)));
+
+    uniforms.uHoleRadius.value.set(holeWidth, holeHeight);
+
     updateCenters();
   }
 
