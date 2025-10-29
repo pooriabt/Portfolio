@@ -16,7 +16,7 @@ const createDigitalRainMaterial = (params?: {
   }
 `;
 
-  // A simple digital rain shader: columns of falling bright glyph-like strips with trails
+  // Swirling "digital rain" shader that wraps around portal center
   const fragmentShader = `precision mediump float;
 varying vec2 vUv;
 uniform float uTime;
@@ -25,56 +25,60 @@ uniform vec3 uColor;
 uniform float uSpeed;
 uniform float uDensity;
 
-// simple hash for per-column/row variation (must be declared at global scope)
+const float PI = 3.14159265359;
+
 float hash(float n) { return fract(sin(n) * 43758.5453123); }
 float hash2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 
 void main() {
   vec2 uv = vUv;
-  // --- Matrix-style character rain (no texture) ---
-  // We'll create columns with per-column randomness, a bright head and a fading trail.
-  // Works with uniforms: uTime, uResolution, uColor, uSpeed, uDensity
 
-  // columns and rows density
-  float cols = max(6.0, floor(uDensity * uResolution.x / 24.0));
-  float rows = max(16.0, floor(uResolution.y / 12.0));
-  float colIndex = floor(uv.x * cols);
-  float rowIndex = floor(uv.y * rows);
+  // Convert to polar coordinates around texture center
+  vec2 centered = uv - 0.5;
+  float radius = length(centered);
+  float angle = atan(centered.y, centered.x);
 
-  // per-column time offset so columns fall independently
-  float colOffset = hash(colIndex) * 4.0;
-  float t = uTime * uSpeed + colOffset;
+  // Twist coordinates to create a spiraling flow
+  float swirl = radius * 6.0 - uTime * (1.2 * uSpeed);
+  angle += swirl + sin(radius * 12.0 - uTime * 1.5) * 0.12;
 
-  // position of the falling head along the column in [0,1]
-  float head = fract(t * 0.25);
+  vec2 twisted = vec2(cos(angle), sin(angle)) * radius;
+  vec2 swirlUv = fract(twisted + 0.5);
+  swirlUv = mix(swirlUv, uv, smoothstep(0.0, 0.05, radius));
 
-  // create a repeating vertical symbol grid and compute how far each symbol is from the head
-  float symbolPos = (rowIndex + 0.5) / rows;
-  float dist = fract(symbolPos - head);
-  // make dist cover distance in 0..1 where small values mean near the head (account for wrap)
+  // Column / row indices in twisted texture space
+  float cols = max(10.0, uDensity * 28.0);
+  float rows = max(18.0, uDensity * 20.0);
+  float colIndex = floor(swirlUv.x * cols);
+  float rowIndex = floor(swirlUv.y * rows);
+
+  float colRand = hash(colIndex);
+  float t = uTime * (0.6 + uSpeed * 1.2) + colRand * 3.0;
+
+  // Each column has a "head" that travels radially (along swirlUv.y)
+  float head = fract(t);
+  float symbolPos = fract(swirlUv.y + colRand);
+  float dist = abs(symbolPos - head);
   dist = min(dist, 1.0 - dist);
 
-  // randomness per-symbol to change brightness/characters
-  float rnd = hash2(vec2(colIndex, rowIndex));
-
-  // head intensity (sharp bright head)
   float headMask = smoothstep(0.02, 0.0, dist);
-  // trail intensity (fades away from head)
-  float trailMask = smoothstep(0.35, 0.0, dist) - headMask * 0.1;
+  float trailMask = smoothstep(0.45, 0.0, dist) - headMask * 0.2;
 
-  // flicker / glyph-on pattern: use fract pattern to make characters appear/disappear
-  float glyphPulse = step(0.6, fract((rowIndex + t * 6.0) * (0.5 + rnd * 0.8)));
+  float rnd = hash2(vec2(colIndex, rowIndex));
+  float glyphPulse = step(0.55, fract((rowIndex + t * 5.5) * (0.45 + rnd * 0.9)));
 
-  // combine masks with randomness so not all symbols light at once
-  float intensity = (0.2 + 0.8 * rnd) * glyphPulse * trailMask + 1.6 * headMask;
+  float intensity = (0.25 + 0.75 * rnd) * glyphPulse * trailMask + 1.7 * headMask;
 
-  // color: keep greenish but use provided uColor, boost head slightly
-  vec3 color = uColor * intensity;
+  // Hue variation around spiral
+  float hueWave = 0.5 + 0.5 * cos(angle * 3.5 - radius * 8.0 + uTime * 1.5);
+  vec3 color = uColor * mix(0.7, 1.6, hueWave) * intensity;
   float alpha = clamp(intensity, 0.0, 1.0);
 
-  // subtle vignette to reduce edges (make sure to subtract vec2 not a float)
-  float vignette = smoothstep(0.0, 0.5, 1.0 - length(uv - vec2(0.5)));
-  alpha *= vignette;
+  // Fade towards center and outer edge to avoid harsh seams
+  float innerFade = smoothstep(0.04, 0.18, radius);
+  float outerFade = 1.0 - smoothstep(0.55, 0.8, radius);
+  float radialFade = innerFade * outerFade;
+  alpha *= radialFade;
 
   gl_FragColor = vec4(color, alpha);
 }
