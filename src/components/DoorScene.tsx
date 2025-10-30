@@ -4,11 +4,11 @@ import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { gsap } from "gsap";
 import { createArchDoorCanvas } from "./archdoorCanvas";
-import { createDigitalRainShader } from "./createDigitalRainShader";
 import imgA from "../assets/perse.png";
 import imgB from "../assets/ring.png";
 import imgC from "../assets/arch-tools.png";
 import { createSpiralBackground } from "./SpiralBackground";
+import { createPortalEllipse } from "./createPortalEllipse";
 
 /**
  * Rick and Morty style portal doors
@@ -16,137 +16,6 @@ import { createSpiralBackground } from "./SpiralBackground";
  * - Each portal displays a texture (arch canvas for left, digital rain for right)
  * - Opening/closing animates with spiral: spreads from center (close), vanishes (open)
  */
-
-function createPortalEllipse(params: {
-  texture: THREE.Texture | null;
-  hue?: number;
-  useDigitalRain?: boolean;
-}) {
-  const uniforms = {
-    uTime: { value: 0 },
-    uSpread: { value: 1 }, // 0 = open (hole visible), 1 = closed (texture fully visible)
-    uScale: { value: 1.0 },
-    uHue: { value: params.hue ?? 0.18 },
-    uAlpha: { value: 1.0 },
-    uMap: { value: params.texture },
-    uResolution: { value: new THREE.Vector2(512, 512) },
-    uHoleRadius: { value: new THREE.Vector2(0.15, 0.25) }, // Match spiral background holes
-    uCenter: { value: new THREE.Vector2(0.5, 0.5) },
-    uSpeed: { value: 0.25 },
-    uDensity: { value: 1.8 },
-    uRainColor: { value: new THREE.Color(0x00ff55) },
-  };
-
-  const vertex = /* glsl */ `
-    varying vec2 vUv;
-    void main() {
-      vUv = uv;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-    }`;
-
-  const digitalRainFunc = params.useDigitalRain
-    ? createDigitalRainShader()
-    : "";
-
-  const fragment = /* glsl */ `
-    precision mediump float;
-    varying vec2 vUv;
-    uniform float uTime;
-    uniform float uSpread;
-    uniform float uScale;
-    uniform float uHue;
-    uniform float uAlpha;
-    uniform sampler2D uMap;
-    uniform vec2 uResolution;
-    uniform vec2 uHoleRadius;
-    uniform vec2 uCenter;
-    ${
-      params.useDigitalRain
-        ? `
-    uniform float uSpeed;
-    uniform float uDensity;
-    uniform vec3 uRainColor;
-    `
-        : ""
-    }
-
-    vec3 hsv2rgb(vec3 c) {
-      vec4 k = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
-      vec3 p = abs(fract(c.xxx + k.xyz) * 6.0 - k.www);
-      return c.z * mix(k.xxx, clamp(p - k.xxx, 0.0, 1.0), c.y);
-    }
-
-    ${digitalRainFunc}
-
-    void main() {
-      vec2 uv = vUv;
-      vec2 screenUv = gl_FragCoord.xy / uResolution;
-      vec2 diffScreen = screenUv - uCenter;
-
-      vec2 ellipseNorm = diffScreen;
-      ellipseNorm.x /= uHoleRadius.x;
-      ellipseNorm.y /= uHoleRadius.y;
-      float ellipseDist = length(ellipseNorm);
-
-      if (ellipseDist > 1.0) {
-        discard;
-      }
-
-      float t = uTime * 1.5;
-
-      // Base texture color
-      vec3 baseColor = vec3(0.05);
-      float baseAlpha = 1.0;
-
-      ${
-        params.useDigitalRain
-          ? `
-      vec4 rainData = getDigitalRainColor(uv, t, uSpeed, uDensity, uRainColor, uResolution);
-      baseColor = rainData.rgb;
-      baseAlpha = rainData.a;
-      `
-          : `
-      vec4 tex = texture2D(uMap, uv);
-      baseColor = (tex.a > 0.0) ? tex.rgb : vec3(0.05);
-      baseAlpha = tex.a;
-      `
-      }
-
-      // Portal hole effect (no spiral animation)
-      float holeRadius = mix(0.35, 0.0, uSpread);
-      float holeSmooth = 0.15;
-      float holeMask = 1.0 - smoothstep(holeRadius - holeSmooth, holeRadius + holeSmooth, ellipseDist);
-
-      // Simple color output - just base texture
-      vec3 outCol = baseColor;
-
-      // Alpha: create transparent hole when open (uSpread=0), full texture when closed (uSpread=1)
-      float outAlpha = baseAlpha * (1.0 - holeMask * (1.0 - uSpread));
-
-      // Ellipse edge fade
-      float ellipseFade = smoothstep(1.0, 0.98, ellipseDist);
-      outAlpha *= ellipseFade * uAlpha;
-
-      gl_FragColor = vec4(outCol, outAlpha);
-    }`;
-
-  const mat = new THREE.ShaderMaterial({
-    vertexShader: vertex,
-    fragmentShader: fragment,
-    uniforms: uniforms as any,
-    transparent: true,
-    depthWrite: false,
-    depthTest: true,
-    side: THREE.DoubleSide,
-    blending: params.useDigitalRain
-      ? THREE.AdditiveBlending
-      : THREE.NormalBlending,
-  });
-
-  const geo = new THREE.PlaneGeometry(1, 1);
-  const mesh = new THREE.Mesh(geo, mat);
-  return { mesh, mat, uniforms };
-}
 
 export default function DoorScene() {
   const mountRef = useRef<HTMLDivElement | null>(null);
@@ -203,6 +72,10 @@ export default function DoorScene() {
       hue: 0.6,
       useDigitalRain: true,
     });
+
+    // Set brush rotation speeds - faster for both portals
+    leftPortal.uniforms.uBrushRotation.value = 0.7; // Faster clockwise rotation
+    rightPortal.uniforms.uBrushRotation.value = -0.8; // Faster counter-clockwise rotation
 
     scene.add(leftPortal.mesh, rightPortal.mesh);
 

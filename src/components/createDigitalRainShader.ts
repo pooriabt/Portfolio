@@ -9,8 +9,7 @@ export function createDigitalRainShader(): string {
   return `
     const float PI = 3.14159265359;
     
-    float hash(float n) { return fract(sin(n) * 43758.5453123); }
-    float hash2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    // Note: hash and hash2 functions should be defined in the main shader before this code
     
     // Generate Matrix-style character pattern
     float matrixChar(vec2 p, float seed) {
