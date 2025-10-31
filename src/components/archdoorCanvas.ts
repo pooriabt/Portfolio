@@ -90,7 +90,9 @@ export function createArchDoorCanvas(
     // Calculate horizontal animation for imgB (ring) and imgC (arch-tools) based on portal width
     // Portal width range: center ± radius = (0.5 ± 0.15) * currentWidth = 0.35 to 0.65 of canvas width
     const portalCenterX = currentWidth * 0.5;
+    const portalCenterY = currentHeight * 0.5;
     const portalRadiusX = currentWidth * 0.15;
+    const portalRadiusY = currentHeight * 0.25; // Portal vertical radius from uHoleRadius (0.25 height)
     const portalMinX = portalCenterX - portalRadiusX;
     const portalMaxX = portalCenterX + portalRadiusX;
     const portalRange = portalMaxX - portalMinX;
@@ -100,6 +102,20 @@ export function createArchDoorCanvas(
     const time = Date.now() * 0.0005; // Slow animation (0.0005 speed factor)
     const imgCOffset = Math.sin(time) * portalRange * 0.5; // imgC (arch-tools) moves within half portal width
     const imgBOffset = Math.sin(time + Math.PI * 0.7) * portalRange * 0.5; // imgB (ring) offset by ~70% phase
+
+    // Apply elliptical clipping matching canvas dimensions (rectangle width)
+    ctx.save();
+    ctx.beginPath();
+    ctx.ellipse(
+      currentWidth / 2, // Center X (middle of canvas width)
+      currentHeight / 2, // Center Y (middle of canvas height)
+      currentWidth / 2, // Radius X (half canvas width = full width)
+      currentHeight / 2, // Radius Y (half canvas height = full height)
+      0,
+      0,
+      2 * Math.PI
+    );
+    ctx.clip();
 
     // draw images with blur and opacity based on distance from blob
     // Line 89: Loop through all loaded images (should be 3: perse, ring, arch-tools)
@@ -170,6 +186,25 @@ export function createArchDoorCanvas(
       let centerY =
         i === 0 ? p.y + scaledH / 2 : i === 1 ? p.y : p.y - scaledH / 2;
 
+      // Check if image center is within canvas bounds (accounting for blur expansion)
+      const blurExpansion = blurPx * 2; // Blur can expand rendering by blur radius on each side
+      const imageBounds = {
+        minX: centerX - scaledW / 2 - blurExpansion,
+        maxX: centerX + scaledW / 2 + blurExpansion,
+        minY: centerY - scaledH / 2 - blurExpansion,
+        maxY: centerY + scaledH / 2 + blurExpansion,
+      };
+
+      // Skip rendering if image is completely outside canvas bounds
+      if (
+        imageBounds.maxX < 0 ||
+        imageBounds.minX > currentWidth ||
+        imageBounds.maxY < 0 ||
+        imageBounds.minY > currentHeight
+      ) {
+        continue;
+      }
+
       // Line 112: Save current canvas context state (transforms, alpha, filters, etc.) to restore later
       ctx.save();
       // Line 113: Set global alpha (opacity) for all subsequent drawing operations
@@ -187,9 +222,30 @@ export function createArchDoorCanvas(
       // Since we translated to center and rotated, drawing at (-scaledW/2, -scaledH/2) centers the image
       // Image will be drawn with calculated scaled dimensions and current rotation applied
       ctx.drawImage(img, -scaledW / 2, -scaledH / 2, scaledW, scaledH);
-      // Line 121: Restore the canvas context to the state saved at line 112 (undoes translate, rotate, alpha, filter)
+      // Line 121: Restore the canvas context to the state saved at line 112 (undoes translate, rotate, alpha, filter, clip)
       ctx.restore();
     }
+
+    // Restore context to remove elliptical clipping region after all images are drawn
+    ctx.restore();
+
+    // DEBUG: Draw colored border for blob influence area (yellow circle)
+    ctx.save();
+    ctx.strokeStyle = "#ffff00"; // Yellow
+    ctx.lineWidth = 4;
+    ctx.setLineDash([5, 5]); // Dashed line to distinguish from clipping
+    ctx.beginPath();
+    ctx.arc(state.x, state.y, state.r, 0, 2 * Math.PI);
+    ctx.stroke();
+    ctx.restore();
+
+    // DEBUG: Draw blob center point (red dot)
+    ctx.save();
+    ctx.fillStyle = "#ff0000"; // Red
+    ctx.beginPath();
+    ctx.arc(state.x, state.y, 5, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.restore();
   }
 
   // Random walk animation for blob movement
