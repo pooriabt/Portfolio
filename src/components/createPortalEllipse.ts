@@ -1,6 +1,7 @@
 // components/createPortalEllipse.ts
 import * as THREE from "three";
 import { createDigitalRainShader } from "./createDigitalRainShader";
+import { glsl, hashFns, hsv2rgbFn, brushHelpers, smoothNoiseFn } from "./glsl";
 
 /**
  * Creates a portal ellipse with shader-based effects
@@ -11,6 +12,10 @@ export function createPortalEllipse(params: {
   texture: THREE.Texture | null;
   hue?: number;
   useDigitalRain?: boolean;
+  brushWidth?: number;
+  brushOuterScale?: number;
+  borderColor?: THREE.ColorRepresentation;
+  brushBorderColor?: THREE.ColorRepresentation;
 }) {
   const uniforms = {
     uTime: { value: 0 },
@@ -26,20 +31,25 @@ export function createPortalEllipse(params: {
     uDensity: { value: 1.8 },
     uRainColor: { value: new THREE.Color(0x00ff55) },
     uBrushRotation: { value: 0.0 }, // Rotation speed for brush border
+    uShowClickEllipse: { value: 0.0 }, // Show click ellipse overlay (0 = hide, 1 = show)
+    uBrushWidth: { value: params.brushWidth ?? 5.0 },
+    uRenderBrushOnly: { value: 0.0 },
+    uBrushOuterScale: { value: params.brushOuterScale ?? 5.0 },
   };
 
-  const vertex = /* glsl */ `
+  const vertex = glsl`
     varying vec2 vUv;
     void main() {
       vUv = uv;
       gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-    }`;
+    }
+  `;
 
   const digitalRainFunc = params.useDigitalRain
     ? createDigitalRainShader()
     : "";
 
-  const fragment = /* glsl */ `
+  const fragment = glsl`
     precision mediump float;
     varying vec2 vUv;
     uniform float uTime;
@@ -52,9 +62,13 @@ export function createPortalEllipse(params: {
     uniform vec2 uHoleRadius;
     uniform vec2 uCenter;
     uniform float uBrushRotation;
+    uniform float uShowClickEllipse;
+    uniform float uBrushWidth;
+    uniform float uRenderBrushOnly;
+    uniform float uBrushOuterScale;
     ${
       params.useDigitalRain
-        ? `
+        ? glsl`
     uniform float uSpeed;
     uniform float uDensity;
     uniform vec3 uRainColor;
@@ -62,256 +76,10 @@ export function createPortalEllipse(params: {
         : ""
     }
 
-    vec3 hsv2rgb(vec3 c) {
-      vec4 k = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
-      vec3 p = abs(fract(c.xxx + k.xyz) * 6.0 - k.www);
-      return c.z * mix(k.xxx, clamp(p - k.xxx, 0.0, 1.0), c.y);
-    }
-
-    // Hash functions for random brush patterns
-    float hash(float n) {
-      return fract(sin(n) * 43758.5453123);
-    }
-    float hash2(vec2 p) {
-      return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-    }
-    
-    // Smooth noise for continuous brush texture
-    float smoothNoise(vec2 p) {
-      vec2 i = floor(p);
-      vec2 f = fract(p);
-      f = f * f * (3.0 - 2.0 * f);
-      
-      float a = hash2(i);
-      float b = hash2(i + vec2(1.0, 0.0));
-      float c = hash2(i + vec2(0.0, 1.0));
-      float d = hash2(i + vec2(1.0, 1.0));
-      
-      return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
-    }
-    
-    // Helper function to create brush layer with specific width (must be defined before use)
-    float getBrushLayerWithWidth(vec2 screenUv, vec2 center, vec2 holeRadius, float angle, float seed, float radialOffset, float angleOffset, float brushWidth) {
-      // Convert to elliptical coordinates
-      vec2 diff = screenUv - center;
-      vec2 ellipseNorm = diff;
-      ellipseNorm.x /= holeRadius.x;
-      ellipseNorm.y /= holeRadius.y;
-      float ellipseDist = length(ellipseNorm);
-      
-      // Distance from edge with radial offset for this line
-      float edgeDist = ellipseDist - 1.0 + radialOffset;
-      
-      // Valid range for this line - wider range to accommodate lines at different positions
-      // Allow lines both inside and outside the ellipse
-      // Use step function instead of if for WebGL compatibility
-      float isInside = step(radialOffset, 0.0); // 1.0 if inside, 0.0 if outside
-      
-      // Range for lines inside ellipse (negative offset)
-      float insideRange = smoothstep(-0.05, -0.02, edgeDist) * smoothstep(-0.005, -0.02, edgeDist);
-      
-      // Range for lines outside ellipse (positive offset)
-      float outsideRange = smoothstep(0.02, 0.005, edgeDist) * smoothstep(0.005, 0.025, edgeDist);
-      
-      // Mix based on whether line is inside or outside
-      float validRange = mix(outsideRange, insideRange, isInside);
-      // Multiply by validRange at end instead of early return
-      
-      // Convert to angle around ellipse with angle offset
-      float currentAngle = atan(diff.y / holeRadius.y, diff.x / holeRadius.x);
-      
-      // Rotate for smooth spinning with per-line angle variation
-      float rotatedAngle = currentAngle - angle + angleOffset;
-      rotatedAngle = rotatedAngle + 3.14159;
-      rotatedAngle = rotatedAngle - floor(rotatedAngle / 6.28318) * 6.28318;
-      
-      float angleCoord = rotatedAngle * 0.159;
-      vec2 brushCoord = vec2(angleCoord * 150.0 + seed * 10.0, edgeDist * 40.0);
-      
-      // Use specified brush width instead of calculated
-      float brushThickness = brushWidth;
-      
-      // Add some variation to width along the stroke
-      float thicknessVar = sin(rotatedAngle * 2.0 + seed) * 0.002;
-      brushThickness += thicknessVar;
-      
-      // IRREGULAR, FRAYED EDGES with line-specific noise
-      vec2 outerNoiseCoord = vec2(angleCoord * 200.0, edgeDist * 50.0 + seed + radialOffset * 100.0);
-      float outerFray = 
-        smoothNoise(outerNoiseCoord) * 0.03 +
-        smoothNoise(outerNoiseCoord * 2.5) * 0.015 +
-        smoothNoise(outerNoiseCoord * 5.0) * 0.008;
-      
-      vec2 innerNoiseCoord = vec2(angleCoord * 185.0, edgeDist * 48.0 + seed * 1.3 + radialOffset * 95.0);
-      float innerFray = 
-        smoothNoise(innerNoiseCoord) * 0.03 +
-        smoothNoise(innerNoiseCoord * 2.3) * 0.015 +
-        smoothNoise(innerNoiseCoord * 4.7) * 0.008;
-      
-      float distFromCenter = abs(edgeDist);
-      
-      // Create brush shape with irregular edges
-      float outerEdgeDist = (distFromCenter - brushThickness) - outerFray;
-      float outerAlpha = 1.0 - smoothstep(0.0, 0.010, outerEdgeDist);
-      float outerMicroFray = smoothNoise(brushCoord * vec2(300.0, 80.0) + seed + radialOffset * 50.0) * 0.002;
-      outerAlpha *= (0.55 + smoothNoise(brushCoord * vec2(400.0, 100.0) + seed * 2.0 + radialOffset * 60.0) * 0.45);
-      outerAlpha = smoothstep(0.0, 0.015, outerAlpha + outerMicroFray - 0.008);
-      
-      float innerEdgeDist = (brushThickness - distFromCenter) - innerFray;
-      float innerAlpha = 1.0 - smoothstep(0.0, 0.010, innerEdgeDist);
-      float innerMicroFray = smoothNoise(brushCoord * vec2(280.0, 75.0) + seed * 1.5 + radialOffset * 45.0) * 0.002;
-      innerAlpha *= (0.6 + smoothNoise(brushCoord * vec2(380.0, 95.0) + seed * 2.3 + radialOffset * 55.0) * 0.4);
-      innerAlpha = smoothstep(0.0, 0.015, innerAlpha + innerMicroFray - 0.008);
-      
-      float lineAlpha = min(outerAlpha, innerAlpha);
-      
-      // Bristle texture - different per line
-      vec2 bristleCoord = vec2(angleCoord * 300.0, distFromCenter * 200.0);
-      float bristle = smoothNoise(bristleCoord + seed + radialOffset * 200.0);
-      lineAlpha *= (0.5 + bristle * 0.5);
-      
-      // Opacity variation per line
-      float opacityVar = sin(rotatedAngle * 2.1 + seed + radialOffset * 100.0) * 0.15;
-      lineAlpha *= (0.7 + opacityVar);
-      
-      // Apply falloffs - wider range for lines at different positions
-      float insideFalloff = smoothstep(-0.05, -0.015, edgeDist);
-      float outsideFalloff = smoothstep(0.025, 0.0, edgeDist);
-      float falloff = mix(outsideFalloff, insideFalloff, step(0.0, edgeDist));
-      
-      lineAlpha *= falloff;
-      // Apply valid range mask (multiplies to 0 if outside range)
-      lineAlpha *= validRange;
-      
-      return lineAlpha;
-    }
-
-    // Generate a single brush layer with offset and variations (keeping for backwards compatibility)
-    float getBrushLayer(vec2 screenUv, vec2 center, vec2 holeRadius, float angle, float seed, float layerOffset, float angleOffset) {
-      // Convert to elliptical coordinates
-      vec2 diff = screenUv - center;
-      vec2 ellipseNorm = diff;
-      ellipseNorm.x /= holeRadius.x;
-      ellipseNorm.y /= holeRadius.y;
-      float ellipseDist = length(ellipseNorm);
-      
-      // Distance from edge with layer offset (each layer slightly offset)
-      float edgeDist = ellipseDist - 1.0 + layerOffset * 0.002;
-      
-      // Wider range for visible brush stroke
-      float validRange = smoothstep(0.08, -0.06, edgeDist) * smoothstep(-0.05, -0.015, edgeDist);
-      
-      // Convert to angle around ellipse with angle offset
-      float currentAngle = atan(diff.y / holeRadius.y, diff.x / holeRadius.x);
-      
-      // Rotate for smooth spinning with per-layer angle variation
-      float rotatedAngle = currentAngle - angle + angleOffset;
-      rotatedAngle = rotatedAngle + 3.14159;
-      rotatedAngle = rotatedAngle - floor(rotatedAngle / 6.28318) * 6.28318;
-      
-      float angleCoord = rotatedAngle * 0.159; // Normalized 0-1
-      vec2 brushCoord = vec2(angleCoord * 150.0 + seed * 10.0, edgeDist * 40.0);
-      
-      // Thickness with layer variation - reduced for thinner brush
-      float thicknessBase = 0.007 + layerOffset * 0.002; // Thinner base, each layer slightly different
-      float thicknessVar = 
-        sin(rotatedAngle * 1.8 + seed + layerOffset) * 0.004 +
-        sin(rotatedAngle * 4.3 + seed * 1.7 + layerOffset * 2.0) * 0.002 +
-        smoothNoise(vec2(angleCoord * 25.0, seed * 0.5 + layerOffset)) * 0.005;
-      float brushThickness = thicknessBase + thicknessVar;
-      
-      // IRREGULAR, FRAYED EDGES - each layer has different noise pattern
-      vec2 outerNoiseCoord = vec2(angleCoord * 200.0, edgeDist * 50.0 + seed + layerOffset * 5.0);
-      float outerFray = 
-        smoothNoise(outerNoiseCoord) * 0.035 +
-        smoothNoise(outerNoiseCoord * 2.5) * 0.018 +
-        smoothNoise(outerNoiseCoord * 5.0) * 0.009;
-      
-      vec2 innerNoiseCoord = vec2(angleCoord * 185.0, edgeDist * 48.0 + seed * 1.3 + layerOffset * 4.5);
-      float innerFray = 
-        smoothNoise(innerNoiseCoord) * 0.035 +
-        smoothNoise(innerNoiseCoord * 2.3) * 0.018 +
-        smoothNoise(innerNoiseCoord * 4.7) * 0.009;
-      
-      float distFromCenter = abs(edgeDist);
-      
-      // Create brush shape with irregular edges
-      float outerEdgeDist = (distFromCenter - brushThickness) - outerFray;
-      float outerAlpha = 1.0 - smoothstep(0.0, 0.012, outerEdgeDist);
-      float outerMicroFray = smoothNoise(brushCoord * vec2(300.0, 80.0) + seed + layerOffset) * 0.002;
-      outerAlpha *= (0.55 + smoothNoise(brushCoord * vec2(400.0, 100.0) + seed * 2.0 + layerOffset) * 0.45);
-      outerAlpha = smoothstep(0.0, 0.018, outerAlpha + outerMicroFray - 0.008);
-      
-      float innerEdgeDist = (brushThickness - distFromCenter) - innerFray;
-      float innerAlpha = 1.0 - smoothstep(0.0, 0.012, innerEdgeDist);
-      float innerMicroFray = smoothNoise(brushCoord * vec2(280.0, 75.0) + seed * 1.5 + layerOffset) * 0.002;
-      innerAlpha *= (0.6 + smoothNoise(brushCoord * vec2(380.0, 95.0) + seed * 2.3 + layerOffset) * 0.4);
-      innerAlpha = smoothstep(0.0, 0.018, innerAlpha + innerMicroFray - 0.008);
-      
-      float layerAlpha = min(outerAlpha, innerAlpha);
-      
-      // Bristle texture - different per layer
-      vec2 bristleCoord = vec2(angleCoord * 300.0, distFromCenter * 200.0);
-      float bristle = smoothNoise(bristleCoord + seed + layerOffset * 3.0);
-      layerAlpha *= (0.5 + bristle * 0.5);
-      
-      // Opacity variation per layer
-      float opacityVar = sin(rotatedAngle * 2.1 + seed + layerOffset) * 0.2;
-      layerAlpha *= (0.7 + opacityVar);
-      
-      // Apply falloffs
-      float insideFalloff = smoothstep(-0.06, -0.015, edgeDist);
-      float outsideFalloff = smoothstep(0.08, 0.02, edgeDist);
-      float falloff = mix(outsideFalloff, insideFalloff, step(0.0, edgeDist));
-      
-      layerAlpha *= falloff * validRange;
-      
-      return layerAlpha;
-    }
-    
-    // Generate 3 distinct brush lines at different distances from portal edge
-    float getBrushEffect(vec2 screenUv, vec2 center, vec2 holeRadius, float angle, float seed) {
-      // Create 3 separate brush lines at different radial positions with different widths
-      // Lines are spaced further apart to be clearly visible as separate strokes
-      
-      // Line 1 - Closest to portal edge (thinnest line) - inside the ellipse
-      float line1Offset = -0.025; // Further inside, clearly separated
-      float line1Width = 0.006;   // Increased width (was 0.004)
-      float line1 = getBrushLayerWithWidth(screenUv, center, holeRadius, angle, seed, line1Offset, 0.0, line1Width);
-      
-      // Line 2 - Middle distance (medium width line) - near edge
-      float line2Offset = -0.010; // Near edge but inside
-      float line2Width = 0.010;   // Increased width (was 0.007)
-      float line2 = getBrushLayerWithWidth(screenUv, center, holeRadius, angle, seed, line2Offset, 0.0008, line2Width);
-      
-      // Line 3 - Furthest from portal edge (thickest line) - outside the ellipse
-      float line3Offset = 0.012;   // Outside the ellipse, clearly separated
-      float line3Width = 0.014;    // Increased width (was 0.010)
-      float line3 = getBrushLayerWithWidth(screenUv, center, holeRadius, angle, seed, line3Offset, -0.0008, line3Width);
-      
-      // Combine the 3 lines - use max to keep them separate and distinct
-      // This ensures each line remains visible as its own stroke
-      float totalBrush = max(line1 * 0.75, max(line2 * 0.85, line3 * 0.9));
-      // Don't clamp - keep natural opacity
-      
-      // Create gaps pattern (applies to all lines)
-      float currentAngle = atan((screenUv.y - center.y) / holeRadius.y, (screenUv.x - center.x) / holeRadius.x);
-      float rotatedAngle = currentAngle - angle;
-      rotatedAngle = rotatedAngle + 3.14159;
-      rotatedAngle = rotatedAngle - floor(rotatedAngle / 6.28318) * 6.28318;
-      float angleCoord = rotatedAngle * 0.159;
-      
-      float gapBase = sin(rotatedAngle * 0.95 + seed * 0.4);
-      gapBase = gapBase * 0.5 + 0.5;
-      gapBase = pow(gapBase, 4.0);
-      float gapNoise = smoothNoise(vec2(angleCoord * 12.0, seed * 1.2));
-      float gapPattern = mix(gapBase, 1.0, smoothstep(0.15, 0.35, gapNoise));
-      
-      totalBrush *= gapPattern;
-      
-      return totalBrush;
-    }
-
+    ${hsv2rgbFn}
+    ${hashFns}
+    ${smoothNoiseFn}
+    ${brushHelpers}
     ${digitalRainFunc}
 
     void main() {
@@ -324,11 +92,17 @@ export function createPortalEllipse(params: {
       ellipseNorm.y /= uHoleRadius.y;
       float ellipseDist = length(ellipseNorm);
 
-      // Allow rendering slightly outside ellipse for brush border (to cover gaps)
-      // Only discard if way outside the brush zone
-      if (ellipseDist > 1.05) {
-        discard;
-      }
+      // Elliptical clipping - use alpha instead of discard to remove rectangular clipping
+      // This allows rendering outside mesh bounds by controlling visibility with alpha
+      float clipEllipseDist = ellipseDist / uBrushOuterScale; // Scale to create larger clipping ellipse
+      
+      // Don't discard - use alpha to fade out beyond clipping boundary instead
+      // This prevents rectangular mesh geometry from clipping the ellipse
+      float clipFade = 1.0 - smoothstep(
+        uBrushOuterScale - 0.2,
+        uBrushOuterScale + 0.2,
+        ellipseDist
+      );
 
       float t = uTime * 1.5;
 
@@ -336,14 +110,15 @@ export function createPortalEllipse(params: {
       vec3 baseColor = vec3(0.05);
       float baseAlpha = 1.0;
 
-      ${
-        params.useDigitalRain
-          ? `
+      if (uRenderBrushOnly < 0.5) {
+        ${
+          params.useDigitalRain
+            ? `
       vec4 rainData = getDigitalRainColor(uv, t, uSpeed, uDensity, uRainColor, uResolution);
       baseColor = rainData.rgb;
       baseAlpha = rainData.a;
       `
-          : `
+            : `
       // Swirl effect for arch canvas texture
       vec2 centered = uv - 0.5;
       float dist = length(centered);
@@ -374,10 +149,16 @@ export function createPortalEllipse(params: {
       baseColor = (tex.a > 0.0) ? tex.rgb : vec3(0.05);
       baseAlpha = tex.a;
       `
+        }
+      } else {
+        baseColor = vec3(0.0);
+        baseAlpha = 0.0;
       }
 
       // Portal hole effect (no spiral animation)
-      float holeRadius = mix(0.35, 0.0, uSpread);
+      // When uSpread=0 (open), holeRadius=7.0 (70% of texture - bigger hole)
+      // When uSpread=1 (closed), holeRadius=0.0 (no hole)
+      float holeRadius = mix(0.7, 0.0, uSpread);
       float holeSmooth = 0.15;
       float holeMask = 1.0 - smoothstep(holeRadius - holeSmooth, holeRadius + holeSmooth, ellipseDist);
 
@@ -391,16 +172,38 @@ export function createPortalEllipse(params: {
       // Smooth rotation - use time directly for continuous animation
       float brushAngle = uTime * uBrushRotation;
       
-      // Get irregular brush effect (frayed edges, varying thickness, gaps)
-      float brushIntensity = getBrushEffect(screenUv, uCenter, uHoleRadius, brushAngle, uHue * 10.0);
+      // Calculate mesh boundary in UV space to align brush inner edge with mesh border
+      // Mesh boundary is at UV distance 0.5 from center (circle radius 0.5)
+      // Convert UV boundary to screen-space: mesh UV boundary corresponds to portal ellipse size
+      // Brush inner edge should align with mesh border (portal boundary), outer edge extends beyond
+      vec2 uvCentered = vUv - 0.5;
+      float uvDistFromCenter = length(uvCentered) * 2.0; // Normalize: max distance from center in UV is 0.707, *2 = ~1.414
       
-      // Ellipse edge fade - extend slightly beyond 1.0 for brush effect
-      // Use weaker fade in brush zone to allow extension
+      // Calculate mesh boundary ellipse in screen space
+      // When uvDistFromCenter = 1.0, we're at mesh boundary (radius 0.5 in UV = normalized 1.0)
+      // At mesh boundary, the screen-space ellipse should match uHoleRadius
+      float brushRadiusScale = 1.0 + clamp(uBrushWidth - 1.0, 0.0, 8.0) * 0.02;
+      vec2 meshBoundaryRadius = uHoleRadius * brushRadiusScale;
+      
+      // Get irregular brush effect (frayed edges, varying thickness, gaps)
+      // Brush inner edge aligns with mesh boundary (portal ellipse), extends outward
+      float brushIntensity = getBrushEffect(
+        screenUv,
+        uCenter,
+        meshBoundaryRadius,
+        brushAngle,
+        uHue * 10.0,
+        uBrushWidth
+      );
+      
+      // Ellipse edge fade - extend beyond 1.0 for brush effect to cover SpiralBackground
+      // Brush should extend with half width outside portal, so fade starts later
       float brushZoneFactor = step(0.01, brushIntensity); // 1.0 if in brush zone, 0.0 otherwise
-      float normalFade = smoothstep(1.07, 0.98, ellipseDist);
-      float brushZoneFade = smoothstep(1.07, 0.94, ellipseDist);
+      float normalFade = smoothstep(uBrushOuterScale + 0.3, 0.98, ellipseDist); // Extend fade range for brush extension
+      float brushZoneFade = smoothstep(uBrushOuterScale + 0.3, 0.88, ellipseDist); // Allow brush to extend further out
       float ellipseFade = mix(normalFade, brushZoneFade, brushZoneFactor);
-      outAlpha *= ellipseFade * uAlpha;
+      // Apply clipping fade to remove rectangular clipping - fade out beyond clipping boundary
+      outAlpha *= ellipseFade * uAlpha ;
       
       // Calculate gradient position along the spinning brush (0 = start/dark, 1 = end/light)
       // Get the angle around the ellipse for gradient calculation
@@ -431,8 +234,35 @@ export function createPortalEllipse(params: {
       // Ensure brush shows even if base alpha is low (for gap coverage) - reduced opacity
       outAlpha = max(outAlpha, brushIntensity * uAlpha * 0.7);
 
+      // Allow brush to render outside mesh boundary by not making border transparent
+      // The brush will extend beyond mesh UV bounds, but since we use screen-space coordinates
+      // and don't discard, pixels outside mesh will still render if they're within render bounds
+
+      // Draw click ellipse overlay (ORANGE) - CLICK HANDLER - triggered when portal is clicked
+      if (uShowClickEllipse > 0.5) {
+        // Use full texture dimensions (same as clipping - covers entire texture)
+        vec2 clickCenter = vec2(0.5, 0.5); // Center of texture in UV space
+        vec2 clickRadius = vec2(0.5, 0.5); // Full texture dimensions (half width/height = full size)
+        vec2 clickDiff = vUv - clickCenter;
+        vec2 clickEllipseNorm = clickDiff;
+        clickEllipseNorm.x /= clickRadius.x;
+        clickEllipseNorm.y /= clickRadius.y;
+        float clickEllipseDist = length(clickEllipseNorm);
+        
+        // Draw orange ellipse border (15px equivalent - very thick for visibility)
+        float ellipseBorder = abs(clickEllipseDist - 1.0);
+        float borderWidth = 0.015; // Border width (increased for visibility - matches canvas version)
+        float ellipseAlpha = 1.0 - smoothstep(0.0, borderWidth, ellipseBorder);
+        
+        if (ellipseAlpha > 0.0) {
+          vec3 orangeColor = vec3(1.0, 0.533, 0.0); // Orange color (#ff8800)
+          outCol = mix(outCol, orangeColor, ellipseAlpha); // Orange - click ellipse (click handler)
+        }
+      }
+
       gl_FragColor = vec4(outCol, outAlpha);
-    }`;
+    }
+  `;
 
   const mat = new THREE.ShaderMaterial({
     vertexShader: vertex,
@@ -440,14 +270,61 @@ export function createPortalEllipse(params: {
     uniforms: uniforms as any,
     transparent: true,
     depthWrite: false,
-    depthTest: true,
+    depthTest: false, // Disable depth test to prevent clipping
     side: THREE.DoubleSide,
     blending: params.useDigitalRain
       ? THREE.AdditiveBlending
       : THREE.NormalBlending,
+    // Prevent any culling or clipping
+    alphaTest: 0.0, // Allow all pixels to render
   });
 
-  const geo = new THREE.PlaneGeometry(1, 1);
+  // Create elliptical geometry to match portal shape - removes rectangular clipping
+  // Base geometry size is 0.5 (radius) - actual portal size determined by DoorScene scaling
+  // Mesh is scaled larger in DoorScene to allow brush to render outside portal boundary
+  const segments = 64; // High detail for smooth ellipse
+  const geo = new THREE.CircleGeometry(0.5, segments); // Base radius 0.5 (diameter 1.0)
   const mesh = new THREE.Mesh(geo, mat);
-  return { mesh, mat, uniforms };
+
+
+  const brushOuterScale = uniforms.uBrushOuterScale.value as number;
+  const brushInnerScale = 1.0;
+  const brushOuterRadius = 0.5 * brushOuterScale;
+  const brushInnerRadius = 0.5 * brushInnerScale;
+  const brushGeo = new THREE.RingGeometry(brushInnerRadius, brushOuterRadius, segments);
+  const brushUniforms = THREE.UniformsUtils.clone(mat.uniforms as any);
+  const sharedUniformKeys = [
+    "uTime",
+    "uSpread",
+    "uScale",
+    "uHue",
+    "uAlpha",
+    "uMap",
+    "uResolution",
+    "uHoleRadius",
+    "uCenter",
+    "uBrushRotation",
+    "uBrushWidth",
+    "uBrushOuterScale",
+  ] as const;
+  sharedUniformKeys.forEach((key) => {
+    brushUniforms[key] = uniforms[key];
+  });
+  brushUniforms.uRenderBrushOnly.value = 1.0;
+  const brushMat = new THREE.ShaderMaterial({
+    vertexShader: vertex,
+    fragmentShader: fragment,
+    uniforms: brushUniforms,
+    transparent: true,
+    depthWrite: false,
+    depthTest: false,
+    side: THREE.DoubleSide,
+    blending: mat.blending,
+  });
+  const brushMesh = new THREE.Mesh(brushGeo, brushMat);
+  brushMesh.position.z = 0.0001;
+  brushMesh.name = "portalBrushRing";
+  mesh.add(brushMesh);
+
+  return { mesh, mat, uniforms, brushMesh };
 }

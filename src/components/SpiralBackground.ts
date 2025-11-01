@@ -1,5 +1,9 @@
 // src/components/SpiralBackground.ts
 import * as THREE from "three";
+import {
+  projectObjectToScreenUv,
+  setPortalHoleRadius,
+} from "./portalMath";
 
 /**
  * createSpiralBackground(scene, camera, renderer, leftObj, rightObj)
@@ -91,7 +95,7 @@ export function createSpiralBackground(
     // Convert to bands
     float band = smoothstep(0.0, 0.2, combined);
     
-    // Elliptical holes (independent x/y scaling)
+    // Elliptical holes (independent x/y scaling) - both portals use same size/shape
     vec2 hp0 = uv - uCenter0;
     hp0.x /= uHoleRadius.x;
     hp0.y /= uHoleRadius.y;
@@ -102,13 +106,19 @@ export function createSpiralBackground(
     hp1.y /= uHoleRadius.y;
     float holeDist1 = length(hp1);
 
-    float alpha = 1.0;
-    if (holeDist0 < 1.0) alpha = 0.0;
-    if (holeDist1 < 1.0) alpha = 0.0;
+    // Use minimum distance for single calculation (both portals same size/shape)
+    float holeDist = min(holeDist0, holeDist1);
 
-    // Soft fade edges
-    alpha *= smoothstep(1.0, 1.02, holeDist0);
-    alpha *= smoothstep(1.0, 1.02, holeDist1);
+    float alpha = 1.0;
+    if (holeDist < 1.0) alpha = 0.0;
+
+    // Soft fade edges - extended fade range to allow portal brush border to show through
+    // Same fade function for both portals (same size/shape)
+    float fade = smoothstep(1.05, 1.4, holeDist);
+    // Keep alpha lower in the brush border zone (between 1.0 and 1.12) to allow brush to show
+    float brushZoneFactor = step(1.0, holeDist) * step(holeDist, 1.12); // 1.0 if in brush zone, 0.0 otherwise
+    // In brush zone, reduce alpha moderately to allow portal brush to show through
+    alpha *= mix(fade, fade * 0.65, brushZoneFactor);
 
     // final color
     vec3 color = mix(vec3(0.0), vec3(1.0), band);
@@ -130,6 +140,7 @@ export function createSpiralBackground(
   // Since we use screen-space coordinates (gl_FragCoord), the exact size doesn't matter
   // as long as it's large enough to fill the camera's view
   const perspectiveCamera = camera as THREE.PerspectiveCamera;
+  const scratchVec3 = new THREE.Vector3();
   const planeDistance = 15; // far behind doors
   const fov = (perspectiveCamera.fov * Math.PI) / 180;
   const cameraDistFromOrigin = Math.abs(perspectiveCamera.position.z);
@@ -145,20 +156,19 @@ export function createSpiralBackground(
   plane.renderOrder = -999; // render first, before everything
   scene.add(plane);
 
-  // helper: project object to uv coords (0..1)
-  const proj = (obj: THREE.Object3D) => {
-    const p = new THREE.Vector3();
-    obj.getWorldPosition(p);
-    p.project(camera as THREE.PerspectiveCamera);
-    return new THREE.Vector2(0.5 * (p.x + 1.0), 0.5 * (1.0 - p.y));
-  };
-
   function updateCenters() {
-    // compute centers once and copy into uniforms
-    const c0 = proj(leftObj);
-    const c1 = proj(rightObj);
-    uniforms.uCenter0.value.copy(c0);
-    uniforms.uCenter1.value.copy(c1);
+    projectObjectToScreenUv(
+      leftObj,
+      perspectiveCamera,
+      uniforms.uCenter0.value,
+      scratchVec3
+    );
+    projectObjectToScreenUv(
+      rightObj,
+      perspectiveCamera,
+      uniforms.uCenter1.value,
+      scratchVec3
+    );
   }
   function resize() {
     const w = renderer.domElement.width;
@@ -166,10 +176,7 @@ export function createSpiralBackground(
     uniforms.uResolution.value.set(w, h);
 
     // Compute independent width/height hole scaling
-    const holeWidth = Math.max(0.05, Math.min(0.17, 125 / Math.max(1, w)));
-    const holeHeight = Math.max(0.05, Math.min(0.5, 200 / Math.max(1, h)));
-
-    uniforms.uHoleRadius.value.set(holeWidth, holeHeight);
+    setPortalHoleRadius(uniforms.uHoleRadius.value, w, h);
 
     updateCenters();
   }

@@ -9,6 +9,10 @@ import imgB from "../assets/ring.png";
 import imgC from "../assets/arch-tools.png";
 import { createSpiralBackground } from "./SpiralBackground";
 import { createPortalEllipse } from "./createPortalEllipse";
+import {
+  projectObjectToScreenUv,
+  setPortalHoleRadius,
+} from "./portalMath";
 
 /**
  * Rick and Morty style portal doors
@@ -176,23 +180,25 @@ export default function DoorScene() {
       const portal = which === "left" ? leftPortal : rightPortal;
       if (!pointerInsidePortal(portal, pointer)) return;
 
-      if (which === "left") toggleLeft();
-      if (which === "right") toggleRight();
+      // Show click ellipse for both portals
+      if (which === "left") {
+        if (archController) archController.showClickEllipse?.();
+        toggleLeft();
+      }
+      if (which === "right") {
+        // Show click ellipse on right portal
+        portal.uniforms.uShowClickEllipse.value = 1.0;
+        setTimeout(() => {
+          portal.uniforms.uShowClickEllipse.value = 0.0;
+        }, 500);
+        toggleRight();
+      }
     }
 
     renderer.domElement.style.cursor = "pointer";
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
 
     const tmpVec3 = new THREE.Vector3();
-    const tmpVec2A = new THREE.Vector2();
-    const tmpVec2B = new THREE.Vector2();
-
-    const projectToScreenUv = (obj: THREE.Object3D, target: THREE.Vector2) => {
-      obj.getWorldPosition(tmpVec3);
-      tmpVec3.project(camera);
-      target.set(0.5 * (tmpVec3.x + 1.0), 0.5 * (1.0 - tmpVec3.y));
-      return target;
-    };
 
     const pointerScreenUv = new THREE.Vector2();
 
@@ -219,18 +225,25 @@ export default function DoorScene() {
       const w = renderer.domElement.width;
       const h = renderer.domElement.height;
 
-      // Calculate hole radius exactly like SpiralBackground
-      const holeWidth = Math.max(0.05, Math.min(0.17, 125 / Math.max(1, w)));
-      const holeHeight = Math.max(0.05, Math.min(0.5, 200 / Math.max(1, h)));
-
       if (leftPortal.uniforms.uResolution) {
         leftPortal.uniforms.uResolution.value.set(w, h);
-        leftPortal.uniforms.uHoleRadius.value.set(holeWidth, holeHeight);
+        setPortalHoleRadius(
+          leftPortal.uniforms.uHoleRadius.value as THREE.Vector2,
+          w,
+          h
+        );
       }
       if (rightPortal.uniforms.uResolution) {
         rightPortal.uniforms.uResolution.value.set(w, h);
-        rightPortal.uniforms.uHoleRadius.value.set(holeWidth, holeHeight);
+        rightPortal.uniforms.uHoleRadius.value.copy(
+          leftPortal.uniforms.uHoleRadius.value as THREE.Vector2
+        );
       }
+
+      const holeWidth = (leftPortal.uniforms.uHoleRadius
+        .value as THREE.Vector2).x;
+      const holeHeight = (leftPortal.uniforms.uHoleRadius
+        .value as THREE.Vector2).y;
 
       // Compute frustum dimensions at portal depth
       const distance = Math.abs(camera.position.z - leftPortal.mesh.position.z);
@@ -255,10 +268,18 @@ export default function DoorScene() {
       if (spiral) spiral.resize();
 
       // Update centers immediately after resize
-      const centerLeft = projectToScreenUv(leftPortal.mesh, tmpVec2A);
-      leftPortal.uniforms.uCenter.value.copy(centerLeft);
-      const centerRight = projectToScreenUv(rightPortal.mesh, tmpVec2B);
-      rightPortal.uniforms.uCenter.value.copy(centerRight);
+      projectObjectToScreenUv(
+        leftPortal.mesh,
+        camera,
+        leftPortal.uniforms.uCenter.value as THREE.Vector2,
+        tmpVec3
+      );
+      projectObjectToScreenUv(
+        rightPortal.mesh,
+        camera,
+        rightPortal.uniforms.uCenter.value as THREE.Vector2,
+        tmpVec3
+      );
     }
     updateSizing();
     window.addEventListener("resize", updateSizing);
@@ -268,10 +289,18 @@ export default function DoorScene() {
     function animate() {
       const elapsed = clock.getElapsedTime();
 
-      const centerLeft = projectToScreenUv(leftPortal.mesh, tmpVec2A);
-      leftPortal.uniforms.uCenter.value.copy(centerLeft);
-      const centerRight = projectToScreenUv(rightPortal.mesh, tmpVec2B);
-      rightPortal.uniforms.uCenter.value.copy(centerRight);
+      projectObjectToScreenUv(
+        leftPortal.mesh,
+        camera,
+        leftPortal.uniforms.uCenter.value as THREE.Vector2,
+        tmpVec3
+      );
+      projectObjectToScreenUv(
+        rightPortal.mesh,
+        camera,
+        rightPortal.uniforms.uCenter.value as THREE.Vector2,
+        tmpVec3
+      );
 
       leftPortal.uniforms.uTime.value = elapsed;
       rightPortal.uniforms.uTime.value = elapsed * 1.05;
