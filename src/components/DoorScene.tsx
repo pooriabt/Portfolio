@@ -162,6 +162,65 @@ export default function DoorScene() {
       return null;
     }
 
+    const tmpVec3 = new THREE.Vector3();
+    const pointerScreenUv = new THREE.Vector2();
+
+    const pointerInsidePortal = (
+      portal: ReturnType<typeof createPortalEllipse>,
+      pointerNdc: THREE.Vector2
+    ) => {
+      pointerScreenUv.set(pointerNdc.x * 0.5 + 0.5, 0.5 * (1.0 - pointerNdc.y));
+      const center = portal.uniforms.uCenter.value as THREE.Vector2;
+      const hole = portal.uniforms.uHoleRadius.value as THREE.Vector2;
+      
+      // Check if center and hole are valid
+      if (!center || !hole) return false;
+      
+      const dx = (pointerScreenUv.x - center.x) / hole.x;
+      const dy = (pointerScreenUv.y - center.y) / hole.y;
+      return dx * dx + dy * dy <= 1.0;
+    };
+
+    // Set default cursor
+    renderer.domElement.style.cursor = "default";
+    
+    function onPointerMove(event: PointerEvent) {
+      const rect = renderer.domElement.getBoundingClientRect();
+      const pointer = new THREE.Vector2();
+      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(pointer, camera);
+      // Only raycast against main portal meshes (not children like brushMesh)
+      const intersects = raycaster.intersectObjects(
+        [leftPortal.mesh, rightPortal.mesh],
+        false
+      );
+      
+      if (intersects.length > 0) {
+        // Since we're not using recursive raycasting, the object is directly the portal mesh
+        const intersectedObj = intersects[0].object;
+        const which = intersectedObj === leftPortal.mesh ? "left" : 
+                      intersectedObj === rightPortal.mesh ? "right" : null;
+        if (which) {
+          const portal = which === "left" ? leftPortal : rightPortal;
+          // Update portal center before checking (in case it changed)
+          projectObjectToScreenUv(
+            portal.mesh,
+            camera,
+            portal.uniforms.uCenter.value as THREE.Vector2,
+            tmpVec3
+          );
+          // Check if pointer is inside the elliptical portal bounds
+          if (pointerInsidePortal(portal, pointer)) {
+            renderer.domElement.style.cursor = "pointer";
+            return;
+          }
+        }
+      }
+      renderer.domElement.style.cursor = "default";
+    }
+
     function onPointerDown(event: PointerEvent) {
       const rect = renderer.domElement.getBoundingClientRect();
       const pointer = new THREE.Vector2();
@@ -169,15 +228,23 @@ export default function DoorScene() {
       pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
       const raycaster = new THREE.Raycaster();
       raycaster.setFromCamera(pointer, camera);
+      // Only raycast against main portal meshes (not children like brushMesh)
       const intersects = raycaster.intersectObjects(
         [leftPortal.mesh, rightPortal.mesh],
-        true
+        false
       );
       if (!intersects.length) return;
       const which = portalFromIntersected(intersects[0].object);
       if (!which) return;
 
       const portal = which === "left" ? leftPortal : rightPortal;
+      // Update portal center before checking (in case it changed)
+      projectObjectToScreenUv(
+        portal.mesh,
+        camera,
+        portal.uniforms.uCenter.value as THREE.Vector2,
+        tmpVec3
+      );
       if (!pointerInsidePortal(portal, pointer)) return;
 
       // Show click ellipse for both portals
@@ -194,25 +261,6 @@ export default function DoorScene() {
         toggleRight();
       }
     }
-
-    renderer.domElement.style.cursor = "pointer";
-    renderer.domElement.addEventListener("pointerdown", onPointerDown);
-
-    const tmpVec3 = new THREE.Vector3();
-
-    const pointerScreenUv = new THREE.Vector2();
-
-    const pointerInsidePortal = (
-      portal: ReturnType<typeof createPortalEllipse>,
-      pointerNdc: THREE.Vector2
-    ) => {
-      pointerScreenUv.set(pointerNdc.x * 0.5 + 0.5, 0.5 * (1.0 - pointerNdc.y));
-      const center = portal.uniforms.uCenter.value as THREE.Vector2;
-      const hole = portal.uniforms.uHoleRadius.value as THREE.Vector2;
-      const dx = (pointerScreenUv.x - center.x) / hole.x;
-      const dy = (pointerScreenUv.y - center.y) / hole.y;
-      return dx * dx + dy * dy <= 1.0;
-    };
 
     function updateSizing() {
       if (!mount) return;
@@ -284,6 +332,10 @@ export default function DoorScene() {
     updateSizing();
     window.addEventListener("resize", updateSizing);
 
+    // Set up event handlers AFTER sizing is initialized
+    renderer.domElement.addEventListener("pointermove", onPointerMove);
+    renderer.domElement.addEventListener("pointerdown", onPointerDown);
+
     const clock = new THREE.Clock();
     let rafId = 0;
     function animate() {
@@ -312,6 +364,7 @@ export default function DoorScene() {
 
     return () => {
       cancelAnimationFrame(rafId);
+      renderer.domElement.removeEventListener("pointermove", onPointerMove);
       renderer.domElement.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("resize", updateSizing);
       if (mount && renderer.domElement.parentElement === mount)

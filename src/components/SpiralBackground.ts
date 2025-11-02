@@ -178,6 +178,17 @@ export function createSpiralBackground(
     // Compute independent width/height hole scaling
     setPortalHoleRadius(uniforms.uHoleRadius.value, w, h);
 
+    // Update plane geometry size to match new aspect ratio
+    const fov = (perspectiveCamera.fov * Math.PI) / 180;
+    const cameraDistFromOrigin = Math.abs(perspectiveCamera.position.z);
+    const totalDistance = cameraDistFromOrigin + planeDistance;
+    const planeHeight = 2 * Math.tan(fov / 2) * totalDistance;
+    const planeWidth = planeHeight * perspectiveCamera.aspect;
+
+    // Update plane geometry dimensions
+    plane.geometry.dispose();
+    plane.geometry = new THREE.PlaneGeometry(planeWidth, planeHeight);
+
     updateCenters();
   }
 
