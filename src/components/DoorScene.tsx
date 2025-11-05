@@ -6,8 +6,7 @@ import { gsap } from "gsap";
 import ScrollTrigger from "gsap/ScrollTrigger";
 import { FontLoader } from "three/addons/loaders/FontLoader.js";
 import { TextGeometry } from "three/addons/geometries/TextGeometry.js";
-import { useControls, Leva, button } from "leva";
-// We'll use dynamic import for mapbox-gl-rtl-text to handle Next.js/Webpack compatibility
+import { useControls, Leva } from "leva";
 
 gsap.registerPlugin(ScrollTrigger);
 import { createArchDoorCanvas } from "./archdoorCanvas";
@@ -36,7 +35,7 @@ export default function DoorScene({
   englishText = "LOVE",
   farsiText = "پوریا برادران توکلی",
   englishFontJsonPath = "/assets/fonts/helvetiker_regular.typeface.json",
-  farsiFontPath = "/assets/fonts/Mj Silicon Bold.typeface.json", // JSON for TextGeometry with RTL shaping
+  farsiFontPath = "/assets/fonts/Mj Silicon Bold.typeface.json",
 }: DoorSceneProps = {}) {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const englishMeshRef = useRef<THREE.Mesh | null>(null);
@@ -48,7 +47,6 @@ export default function DoorScene({
   const farsiFontRef = useRef<any>(null);
   const rtlTextPluginRef = useRef<any>(null);
 
-  // Helper function to apply perspective distortion (using function declaration to hoist)
   function applyPerspectiveDistortion(
     geometry: THREE.BufferGeometry,
     perspective: number
@@ -72,7 +70,6 @@ export default function DoorScene({
     geometry.computeBoundingBox();
   }
 
-  // Leva controls for text appearance - complete control with persistence
   const textControls = useControls("English Text", {
     // Geometry Settings
     size: { value: 0.3, min: 0.05, max: 1, step: 0.05 },
@@ -154,25 +151,76 @@ export default function DoorScene({
     },
   });
 
-  // Helper function to shape Farsi text using mapbox-gl-rtl-text
-  // Similar to RtlTextHelper.farsify() from the example
   async function farsifyText(text: string, rtlPlugin: any): Promise<string> {
     if (!rtlPlugin || !text) return text;
 
     try {
-      // Apply Arabic shaping to get proper ligatures
       const shaped = rtlPlugin.applyArabicShaping(text);
-      // Process bidirectional text to get visual order (right-to-left)
       const lines = rtlPlugin.processBidirectionalText(shaped, []);
-      // Join lines (should be single line for our use case)
       return lines.join("\n");
     } catch (error) {
       console.error("Error shaping Farsi text:", error);
-      return text; // Fallback to original text
+      return text;
     }
   }
 
-  // Leva controls for Farsi text - Full 3D support with TextGeometry + RTL shaping
+  // Helper function to update perspective distortion on existing geometry
+  function updatePerspectiveDistortion(
+    mesh: THREE.Mesh,
+    originalGeom: THREE.BufferGeometry | null,
+    perspective: number
+  ) {
+    if (!originalGeom || !mesh.geometry) return;
+
+    const originalPositions = originalGeom.attributes.position;
+    const currentPositions = mesh.geometry.attributes.position;
+
+    for (let i = 0; i < originalPositions.count; i++) {
+      currentPositions.setXYZ(
+        i,
+        originalPositions.getX(i),
+        originalPositions.getY(i),
+        originalPositions.getZ(i)
+      );
+    }
+
+    if (!mesh.geometry.boundingBox) {
+      mesh.geometry.computeBoundingBox();
+    }
+    const bbox = mesh.geometry.boundingBox!;
+    const height = bbox.max.y - bbox.min.y;
+    const centerY = (bbox.max.y + bbox.min.y) / 2;
+
+    for (let i = 0; i < currentPositions.count; i++) {
+      const y = currentPositions.getY(i);
+      const normalizedY = height > 0 ? (y - centerY) / (height / 2) : 0;
+      const scaleX = 1 + perspective * normalizedY;
+      const x = currentPositions.getX(i);
+      currentPositions.setX(i, x * scaleX);
+    }
+    currentPositions.needsUpdate = true;
+    mesh.geometry.computeBoundingBox();
+  }
+
+  // Helper function to update material properties
+  function updateMaterialProperties(
+    material: THREE.MeshStandardMaterial,
+    controls: any
+  ) {
+    material.color.set(controls.color);
+    material.opacity = controls.opacity;
+    material.transparent = true;
+    material.side = THREE.FrontSide;
+    material.depthTest = true;
+    material.depthWrite = true;
+    material.roughness = controls.roughness;
+    material.metalness = controls.metalness;
+    material.emissive.set(controls.emissiveEnabled ? controls.color : 0x000000);
+    material.emissiveIntensity = controls.emissiveEnabled
+      ? controls.emissiveIntensity
+      : 0;
+  }
+
   const farsiTextControls = useControls("Farsi Text", {
     // Geometry Settings
     fontSize: { value: 0.3, min: 0.05, max: 1, step: 0.05 },
@@ -555,14 +603,9 @@ export default function DoorScene({
       const portalWidthWorld = frustumWidth * holeWidth * 2;
       const portalHeightWorld = frustumHeight * holeHeight * 2;
 
-      // Store the target scale for scroll animation (don't apply directly)
       initialPortalScale.x = portalWidthWorld;
       initialPortalScale.y = portalHeightWorld;
       initialPortalScale.z = 1;
-
-      // Only set scale if not controlled by GSAP (will be set by scroll animation)
-      // leftPortal.mesh.scale.set(portalWidthWorld, portalHeightWorld, 1);
-      // rightPortal.mesh.scale.set(portalWidthWorld, portalHeightWorld, 1);
 
       // Determine spacing between portals using UV gap
       const gapUv = Math.max(0.06, holeWidth * 0.8);
@@ -591,13 +634,9 @@ export default function DoorScene({
     updateSizing();
     window.addEventListener("resize", updateSizing);
 
-    // Set up event handlers AFTER sizing is initialized
     renderer.domElement.addEventListener("pointermove", onPointerMove);
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
 
-    // GSAP ScrollTrigger animation: Scale portals from small to full size
-    // Scale the entire portal mesh AND explicitly scale brushMesh
-    // In Three.js, scaling a parent should scale children, but let's be explicit
     const portalScaleTimeline = gsap.timeline({
       scrollTrigger: {
         trigger: mount,
@@ -607,8 +646,6 @@ export default function DoorScene({
       },
     });
 
-    // Scale the portal mesh (main ellipse)
-    // Since brushMesh is a child of the portal mesh, it will automatically scale with the parent
     portalScaleTimeline.to(leftPortal.mesh.scale, {
       x: initialPortalScale.x,
       y: initialPortalScale.y,
@@ -625,9 +662,6 @@ export default function DoorScene({
       },
       "<"
     );
-
-    // Note: brushMesh is a child of the portal mesh, so it automatically scales with parent
-    // No need to animate brushMesh separately - it inherits parent's scale transformation
 
     const clock = new THREE.Clock();
     let rafId = 0;
@@ -654,12 +688,9 @@ export default function DoorScene({
       renderer.render(scene, camera);
     }
 
-    // Add text rendering to the scene
     const textGroup = new THREE.Group();
-    textGroup.position.z = 0; // Ensure group is at correct z position
+    textGroup.position.z = 0;
     scene.add(textGroup);
-
-    // English Text using TextGeometry (JSON font only)
     let englishMesh: THREE.Mesh | null = null;
     const loadEnglish = () =>
       new Promise<void>((resolve, reject) => {
@@ -667,74 +698,37 @@ export default function DoorScene({
         loader.load(
           englishFontJsonPath,
           (font) => {
-            // Store font reference for regeneration
             fontRef.current = font;
-            // Store textGroup reference
             textGroupRef.current = textGroup;
 
-            // TextGeometry with all Leva controls
-            const geomConfig: any = {
+            const geomConfig = createGeometryConfigHelper(
+              textControls,
               font,
-              size: textControls.size,
-              depth: textControls.depth,
-              curveSegments: textControls.curveSegments,
-            };
-
-            if (textControls.bevelEnabled) {
-              geomConfig.bevelEnabled = true;
-              geomConfig.bevelThickness = textControls.bevelThickness;
-              geomConfig.bevelSize = textControls.bevelSize;
-              geomConfig.bevelSegments = textControls.bevelSegments;
-            } else {
-              geomConfig.bevelEnabled = false;
-            }
-
+              false
+            );
             const geom = new TextGeometry(englishText, geomConfig);
             geom.computeBoundingBox();
             geom.center();
 
-            // Store original geometry for perspective distortion
-            const originalGeom = geom.clone();
-            originalGeometryRef.current = originalGeom;
-
-            // Apply vertical perspective distortion
+            originalGeometryRef.current = geom.clone();
             applyPerspectiveDistortion(geom, textControls.verticalPerspective);
 
-            const mat = new THREE.MeshStandardMaterial({
-              color: textControls.color,
-              emissive: textControls.emissiveEnabled
-                ? textControls.color
-                : 0x000000,
-              emissiveIntensity: textControls.emissiveEnabled
-                ? textControls.emissiveIntensity
-                : 0,
-              metalness: textControls.metalness,
-              roughness: textControls.roughness,
-              opacity: textControls.opacity,
-              flatShading: false,
-              transparent: true,
-              side: THREE.FrontSide, // Only render front faces (backface culling)
-              depthTest: true, // Enable depth testing for proper 3D rendering
-              depthWrite: true, // Enable depth writing for proper occlusion
-            });
-
+            const mat = createTextMaterialHelper(textControls);
             englishMesh = new THREE.Mesh(geom, mat);
             englishMesh.position.set(
               textControls.posX,
               textControls.posY,
               textControls.posZ
             );
-            englishMesh.rotation.x = textControls.rotX;
-            englishMesh.rotation.y = textControls.rotY;
-            englishMesh.rotation.z = textControls.rotZ;
+            englishMesh.rotation.set(
+              textControls.rotX,
+              textControls.rotY,
+              textControls.rotZ
+            );
             englishMesh.renderOrder = 199;
             englishMesh.frustumCulled = false;
             textGroup.add(englishMesh);
-            englishMeshRef.current = englishMesh; // Store ref for reactive updates
-
-            // Store font and textGroup for regeneration
-            fontRef.current = font;
-            textGroupRef.current = textGroup;
+            englishMeshRef.current = englishMesh;
             resolve();
           },
           undefined,
@@ -745,52 +739,34 @@ export default function DoorScene({
         );
       });
 
-    // Farsi text using TextGeometry + mapbox-gl-rtl-text for proper ligatures and RTL
     let farsiMesh: THREE.Mesh | null = null;
     const loadFarsi = () =>
       new Promise<void>(async (resolve, reject) => {
-        console.log("Loading Farsi font from:", farsiFontPath);
-
-        // Initialize RTL plugin if not already done
         if (!rtlTextPluginRef.current) {
           try {
-            // Use dynamic import to handle Next.js/Webpack module resolution
-            // @ts-ignore
             const rtlTextPluginModule = await import(
               "@mapbox/mapbox-gl-rtl-text"
             );
-
-            // The library exports a default async function that returns a promise
-            // Handle different module formats
             let pluginPromise: Promise<any>;
 
-            // Try different ways the module might be exported
             if (rtlTextPluginModule.default) {
               const defaultExport = rtlTextPluginModule.default;
               if (typeof defaultExport === "function") {
-                // Default is a function - call it
-                pluginPromise = defaultExport();
+                pluginPromise = (defaultExport as () => Promise<any>)();
               } else if (defaultExport instanceof Promise) {
-                // Default is already a promise
                 pluginPromise = defaultExport;
               } else {
-                // Default is the plugin object itself
                 pluginPromise = Promise.resolve(defaultExport);
               }
             } else if (typeof rtlTextPluginModule === "function") {
-              // Module itself is a function
-              pluginPromise = rtlTextPluginModule();
+              pluginPromise = (rtlTextPluginModule as any)();
             } else {
-              // Try to use it directly
               pluginPromise = Promise.resolve(rtlTextPluginModule);
             }
 
-            // Await the promise to get the actual plugin object with methods
-            const plugin = await pluginPromise;
-            rtlTextPluginRef.current = plugin;
-            console.log("✅ RTL text plugin initialized", plugin);
+            rtlTextPluginRef.current = await pluginPromise;
           } catch (error) {
-            console.error("❌ Failed to initialize RTL plugin:", error);
+            console.error("Failed to initialize RTL plugin:", error);
             reject(error);
             return;
           }
@@ -800,97 +776,55 @@ export default function DoorScene({
         loader.load(
           farsiFontPath,
           async (font) => {
-            console.log("Farsi font loaded successfully:", font);
             if (!font) {
-              console.error("Farsi font loaded but is null or invalid");
               console.warn("Continuing without Farsi text...");
               resolve();
               return;
             }
 
-            // Store font reference for regeneration
             farsiFontRef.current = font;
-
-            // Shape Farsi text using RTL plugin (applies Arabic shaping + bidirectional processing)
             const shapedText = await farsifyText(
               farsiText,
               rtlTextPluginRef.current
             );
-            console.log("Shaped Farsi text:", shapedText);
 
-            // Create TextGeometry with all Leva controls (same as English)
-            const geomConfig: any = {
+            const geomConfig = createGeometryConfigHelper(
+              farsiTextControls,
               font,
-              size: farsiTextControls.fontSize,
-              depth: farsiTextControls.depth,
-              curveSegments: farsiTextControls.curveSegments,
-            };
-
-            if (farsiTextControls.bevelEnabled) {
-              geomConfig.bevelEnabled = true;
-              geomConfig.bevelThickness = farsiTextControls.bevelThickness;
-              geomConfig.bevelSize = farsiTextControls.bevelSize;
-              geomConfig.bevelSegments = farsiTextControls.bevelSegments;
-            } else {
-              geomConfig.bevelEnabled = false;
-            }
-
+              true
+            );
             const geom = new TextGeometry(shapedText, geomConfig);
             geom.computeBoundingBox();
             geom.center();
 
-            // Store original geometry for perspective distortion
-            const originalGeom = geom.clone();
-            farsiOriginalGeometryRef.current = originalGeom;
-
-            // Apply vertical perspective distortion
+            farsiOriginalGeometryRef.current = geom.clone();
             applyPerspectiveDistortion(
               geom,
               farsiTextControls.verticalPerspective
             );
 
-            const mat = new THREE.MeshStandardMaterial({
-              color: farsiTextControls.color,
-              emissive: farsiTextControls.emissiveEnabled
-                ? farsiTextControls.color
-                : 0x000000,
-              emissiveIntensity: farsiTextControls.emissiveEnabled
-                ? farsiTextControls.emissiveIntensity
-                : 0,
-              metalness: farsiTextControls.metalness,
-              roughness: farsiTextControls.roughness,
-              opacity: farsiTextControls.opacity,
-              flatShading: false,
-              transparent: true,
-              side: THREE.FrontSide,
-              depthTest: true,
-              depthWrite: true,
-            });
-
+            const mat = createTextMaterialHelper(farsiTextControls);
             farsiMesh = new THREE.Mesh(geom, mat);
             farsiMesh.position.set(
               farsiTextControls.posX,
               farsiTextControls.posY,
               farsiTextControls.posZ
             );
-            farsiMesh.rotation.x = farsiTextControls.rotX;
-            farsiMesh.rotation.y = farsiTextControls.rotY;
-            farsiMesh.rotation.z = farsiTextControls.rotZ;
+            farsiMesh.rotation.set(
+              farsiTextControls.rotX,
+              farsiTextControls.rotY,
+              farsiTextControls.rotZ
+            );
             farsiMesh.renderOrder = 200;
             farsiMesh.frustumCulled = false;
             textGroup.add(farsiMesh);
             farsiMeshRef.current = farsiMesh;
-
-            console.log("✅ Farsi text with ligatures and 3D depth created");
             resolve();
           },
-          (progress) => {
-            console.log("Farsi font loading progress:", progress);
-          },
+          undefined,
           (err) => {
-            console.error("❌ Farsi font load error:", err);
-            console.warn("⚠️ Continuing without Farsi text...");
-            resolve(); // Resolve instead of reject to prevent app crash
+            console.error("Farsi font load error:", err);
+            resolve();
           }
         );
       });
@@ -898,21 +832,15 @@ export default function DoorScene({
     // Load both fonts & text BEFORE starting animation
     Promise.all([loadEnglish(), loadFarsi()])
       .then(() => {
-        // Setup initial state: texts centered below portals
-        // Set initial scales for scroll animation
         if (englishMesh) {
-          // Start with smaller scale, will animate up during scroll
           englishMesh.scale.setScalar(0.6);
         }
 
         if (farsiMesh) {
-          // Start with smaller scale, will animate up during scroll
           farsiMesh.scale.setScalar(0.3);
         }
 
-        // Setup GSAP ScrollTrigger animations: Scale and position texts during scroll
         if (englishMesh) {
-          // Scale animation: start small, grow during scroll
           gsap.to(englishMesh.scale, {
             x: 1.0,
             y: 1.0,
@@ -926,7 +854,6 @@ export default function DoorScene({
             },
           });
 
-          // Position animation: move up during scroll
           gsap.to(englishMesh.position, {
             y: -1.0, // Final position higher (closer to Farsi)
             ease: "none",
@@ -939,9 +866,7 @@ export default function DoorScene({
           });
         }
 
-        // Animate Farsi text scale and position on same scroll
         if (farsiMesh) {
-          // Scale animation: start small, grow during scroll
           gsap.to(farsiMesh.scale, {
             x: 0.5,
             y: 0.5,
@@ -955,7 +880,6 @@ export default function DoorScene({
             },
           });
 
-          // Position animation: move up during scroll
           gsap.to(farsiMesh.position, {
             y: -0.7, // Final position higher
             ease: "none",
@@ -986,245 +910,47 @@ export default function DoorScene({
       if (archTexture) archTexture.dispose();
       if (leftPortal.mat) leftPortal.mat.dispose();
       if (rightPortal.mat) rightPortal.mat.dispose();
-      // Clean up text meshes
-      if (farsiMesh) {
-        farsiMesh.geometry.dispose();
-        if (Array.isArray(farsiMesh.material)) {
-          farsiMesh.material.forEach((m) => (m as THREE.Material).dispose());
+      const disposeMesh = (mesh: THREE.Mesh | null) => {
+        if (!mesh) return;
+        mesh.geometry.dispose();
+        if (Array.isArray(mesh.material)) {
+          mesh.material.forEach((m) => (m as THREE.Material).dispose());
         } else {
-          farsiMesh.material.dispose();
+          mesh.material.dispose();
         }
-      }
-      if (englishMesh) {
-        englishMesh.geometry.dispose();
-        if (Array.isArray(englishMesh.material)) {
-          englishMesh.material.forEach((m) => (m as THREE.Material).dispose());
-        } else englishMesh.material.dispose();
-      }
+      };
+      disposeMesh(farsiMesh);
+      disposeMesh(englishMesh);
       renderer.dispose();
       if (spiral) spiral.dispose();
-      // Clean up ScrollTrigger
       ScrollTrigger.getAll().forEach((st) => st.kill());
     };
   }, [englishText, farsiText, englishFontJsonPath, farsiFontPath]);
 
-  // Helper function to regenerate geometry when geometry controls change
-  const regenerateGeometry = () => {
-    const mesh = englishMeshRef.current;
-    const font = fontRef.current;
-    const textGroup = textGroupRef.current;
-
-    if (!mesh || !font || !textGroup || !englishText) return;
-
-    // Type assertion for Leva controls
-    const controls = textControls as any;
-
-    // Remove old mesh from scene
-    textGroup.remove(mesh);
-
-    // Dispose old geometry and material
-    mesh.geometry.dispose();
-    if (Array.isArray(mesh.material)) {
-      mesh.material.forEach((m) => (m as THREE.Material).dispose());
-    } else {
-      mesh.material.dispose();
-    }
-
-    // Create new geometry with updated controls
-    const geomConfig: any = {
+  function createGeometryConfigHelper(
+    controls: any,
+    font: any,
+    isFarsi: boolean = false
+  ) {
+    const config: any = {
       font,
-      size: controls.size,
+      size: isFarsi ? controls.fontSize : controls.size,
       depth: controls.depth,
       curveSegments: controls.curveSegments,
     };
-
     if (controls.bevelEnabled) {
-      geomConfig.bevelEnabled = true;
-      geomConfig.bevelThickness = controls.bevelThickness;
-      geomConfig.bevelSize = controls.bevelSize;
-      geomConfig.bevelSegments = controls.bevelSegments;
+      config.bevelEnabled = true;
+      config.bevelThickness = controls.bevelThickness;
+      config.bevelSize = controls.bevelSize;
+      config.bevelSegments = controls.bevelSegments;
     } else {
-      geomConfig.bevelEnabled = false;
+      config.bevelEnabled = false;
     }
+    return config;
+  }
 
-    const geom = new TextGeometry(englishText, geomConfig);
-    geom.computeBoundingBox();
-    geom.center();
-
-    // Store original geometry for perspective distortion
-    const originalGeom = geom.clone();
-    originalGeometryRef.current = originalGeom;
-
-    // Apply vertical perspective distortion
-    applyPerspectiveDistortion(geom, controls.verticalPerspective);
-
-    // Create new material
-    const mat = new THREE.MeshStandardMaterial({
-      color: controls.color,
-      emissive: controls.emissiveEnabled ? controls.color : 0x000000,
-      emissiveIntensity: controls.emissiveEnabled
-        ? controls.emissiveIntensity
-        : 0,
-      metalness: controls.metalness,
-      roughness: controls.roughness,
-      opacity: controls.opacity,
-      flatShading: false,
-      transparent: true,
-      side: THREE.FrontSide, // Only render front faces (backface culling)
-      depthTest: true, // Enable depth testing for proper 3D rendering
-      depthWrite: true, // Enable depth writing for proper occlusion
-    });
-
-    // Create new mesh with updated geometry
-    const newMesh = new THREE.Mesh(geom, mat);
-    newMesh.position.set(controls.posX, controls.posY, controls.posZ);
-    newMesh.rotation.set(controls.rotX, controls.rotY, controls.rotZ);
-    newMesh.renderOrder = 199;
-    newMesh.frustumCulled = false;
-
-    textGroup.add(newMesh);
-    englishMeshRef.current = newMesh;
-  };
-
-  // Regenerate geometry when geometry controls change
-  useEffect(() => {
-    const mesh = englishMeshRef.current;
-    if (!mesh) return;
-
-    // Check if geometry-related controls changed - if so, regenerate
-    const controls = textControls as any;
-    regenerateGeometry();
-  }, [
-    (textControls as any).size,
-    (textControls as any).depth,
-    (textControls as any).curveSegments,
-    (textControls as any).bevelEnabled,
-    (textControls as any).bevelThickness,
-    (textControls as any).bevelSize,
-    (textControls as any).bevelSegments,
-    englishText,
-  ]);
-
-  // Update text properties when non-geometry controls change
-  useEffect(() => {
-    const mesh = englishMeshRef.current;
-    if (!mesh) return;
-
-    const controls = textControls as any;
-
-    // Update position
-    mesh.position.set(controls.posX, controls.posY, controls.posZ);
-    // Update rotation
-    mesh.rotation.set(controls.rotX, controls.rotY, controls.rotZ);
-
-    // Update vertical perspective distortion
-    const originalGeom = originalGeometryRef.current;
-    if (originalGeom && mesh.geometry) {
-      // Restore original positions from cloned geometry
-      const originalPositions = originalGeom.attributes.position;
-      const currentPositions = mesh.geometry.attributes.position;
-
-      // Copy original positions back
-      for (let i = 0; i < originalPositions.count; i++) {
-        currentPositions.setXYZ(
-          i,
-          originalPositions.getX(i),
-          originalPositions.getY(i),
-          originalPositions.getZ(i)
-        );
-      }
-
-      // Apply perspective distortion
-      if (!mesh.geometry.boundingBox) {
-        mesh.geometry.computeBoundingBox();
-      }
-      const bbox = mesh.geometry.boundingBox!;
-      const height = bbox.max.y - bbox.min.y;
-      const centerY = (bbox.max.y + bbox.min.y) / 2;
-
-      for (let i = 0; i < currentPositions.count; i++) {
-        const y = currentPositions.getY(i);
-        // Normalize Y to -1 (bottom) to 1 (top)
-        const normalizedY = height > 0 ? (y - centerY) / (height / 2) : 0;
-        // Apply perspective: scale X based on Y position
-        const controls = textControls as any;
-        const scaleX = 1 + controls.verticalPerspective * normalizedY;
-        const x = currentPositions.getX(i);
-        currentPositions.setX(i, x * scaleX);
-      }
-      currentPositions.needsUpdate = true;
-      mesh.geometry.computeBoundingBox();
-    }
-
-    // Update material properties
-    if (mesh.material instanceof THREE.MeshStandardMaterial) {
-      const controls = textControls as any;
-      mesh.material.color.set(controls.color);
-      mesh.material.opacity = controls.opacity;
-      mesh.material.transparent = true;
-      mesh.material.side = THREE.FrontSide; // Ensure backface culling is enabled
-      mesh.material.depthTest = true; // Enable depth testing
-      mesh.material.depthWrite = true; // Enable depth writing
-      mesh.material.roughness = controls.roughness;
-      mesh.material.metalness = controls.metalness;
-      mesh.material.emissive.set(
-        controls.emissiveEnabled ? controls.color : 0x000000
-      );
-      mesh.material.emissiveIntensity = controls.emissiveEnabled
-        ? controls.emissiveIntensity
-        : 0;
-    }
-  }, [textControls]);
-
-  // Helper function to regenerate Farsi geometry when geometry controls change
-  const regenerateFarsiGeometry = async () => {
-    const mesh = farsiMeshRef.current;
-    const font = farsiFontRef.current;
-    const textGroup = textGroupRef.current;
-
-    if (!mesh || !font || !textGroup || !farsiText || !rtlTextPluginRef.current)
-      return;
-
-    const controls = farsiTextControls as any;
-
-    textGroup.remove(mesh);
-
-    mesh.geometry.dispose();
-    if (Array.isArray(mesh.material)) {
-      mesh.material.forEach((m) => (m as THREE.Material).dispose());
-    } else {
-      mesh.material.dispose();
-    }
-
-    // Shape Farsi text using RTL plugin
-    const shapedText = await farsifyText(farsiText, rtlTextPluginRef.current);
-
-    const geomConfig: any = {
-      font,
-      size: controls.fontSize,
-      depth: controls.depth,
-      curveSegments: controls.curveSegments,
-    };
-
-    if (controls.bevelEnabled) {
-      geomConfig.bevelEnabled = true;
-      geomConfig.bevelThickness = controls.bevelThickness;
-      geomConfig.bevelSize = controls.bevelSize;
-      geomConfig.bevelSegments = controls.bevelSegments;
-    } else {
-      geomConfig.bevelEnabled = false;
-    }
-
-    const geom = new TextGeometry(shapedText, geomConfig);
-    geom.computeBoundingBox();
-    geom.center();
-
-    const originalGeom = geom.clone();
-    farsiOriginalGeometryRef.current = originalGeom;
-
-    applyPerspectiveDistortion(geom, controls.verticalPerspective);
-
-    const mat = new THREE.MeshStandardMaterial({
+  function createTextMaterialHelper(controls: any) {
+    return new THREE.MeshStandardMaterial({
       color: controls.color,
       emissive: controls.emissiveEnabled ? controls.color : 0x000000,
       emissiveIntensity: controls.emissiveEnabled
@@ -1239,7 +965,104 @@ export default function DoorScene({
       depthTest: true,
       depthWrite: true,
     });
+  }
 
+  const regenerateGeometry = () => {
+    const mesh = englishMeshRef.current;
+    const font = fontRef.current;
+    const textGroup = textGroupRef.current;
+
+    if (!mesh || !font || !textGroup || !englishText) return;
+
+    const controls = textControls as any;
+    textGroup.remove(mesh);
+    mesh.geometry.dispose();
+    if (Array.isArray(mesh.material)) {
+      mesh.material.forEach((m) => (m as THREE.Material).dispose());
+    } else {
+      mesh.material.dispose();
+    }
+
+    const geomConfig = createGeometryConfigHelper(controls, font, false);
+    const geom = new TextGeometry(englishText, geomConfig);
+    geom.computeBoundingBox();
+    geom.center();
+
+    originalGeometryRef.current = geom.clone();
+    applyPerspectiveDistortion(geom, controls.verticalPerspective);
+
+    const mat = createTextMaterialHelper(controls);
+    const newMesh = new THREE.Mesh(geom, mat);
+    newMesh.position.set(controls.posX, controls.posY, controls.posZ);
+    newMesh.rotation.set(controls.rotX, controls.rotY, controls.rotZ);
+    newMesh.renderOrder = 199;
+    newMesh.frustumCulled = false;
+
+    textGroup.add(newMesh);
+    englishMeshRef.current = newMesh;
+  };
+
+  useEffect(() => {
+    const mesh = englishMeshRef.current;
+    if (!mesh) return;
+    regenerateGeometry();
+  }, [
+    (textControls as any).size,
+    (textControls as any).depth,
+    (textControls as any).curveSegments,
+    (textControls as any).bevelEnabled,
+    (textControls as any).bevelThickness,
+    (textControls as any).bevelSize,
+    (textControls as any).bevelSegments,
+    englishText,
+  ]);
+
+  useEffect(() => {
+    const mesh = englishMeshRef.current;
+    if (!mesh) return;
+
+    const controls = textControls as any;
+    mesh.position.set(controls.posX, controls.posY, controls.posZ);
+    mesh.rotation.set(controls.rotX, controls.rotY, controls.rotZ);
+
+    updatePerspectiveDistortion(
+      mesh,
+      originalGeometryRef.current,
+      controls.verticalPerspective
+    );
+
+    if (mesh.material instanceof THREE.MeshStandardMaterial) {
+      updateMaterialProperties(mesh.material, controls);
+    }
+  }, [textControls]);
+
+  const regenerateFarsiGeometry = async () => {
+    const mesh = farsiMeshRef.current;
+    const font = farsiFontRef.current;
+    const textGroup = textGroupRef.current;
+
+    if (!mesh || !font || !textGroup || !farsiText || !rtlTextPluginRef.current)
+      return;
+
+    const controls = farsiTextControls as any;
+    textGroup.remove(mesh);
+    mesh.geometry.dispose();
+    if (Array.isArray(mesh.material)) {
+      mesh.material.forEach((m) => (m as THREE.Material).dispose());
+    } else {
+      mesh.material.dispose();
+    }
+
+    const shapedText = await farsifyText(farsiText, rtlTextPluginRef.current);
+    const geomConfig = createGeometryConfigHelper(controls, font, true);
+    const geom = new TextGeometry(shapedText, geomConfig);
+    geom.computeBoundingBox();
+    geom.center();
+
+    farsiOriginalGeometryRef.current = geom.clone();
+    applyPerspectiveDistortion(geom, controls.verticalPerspective);
+
+    const mat = createTextMaterialHelper(controls);
     const newMesh = new THREE.Mesh(geom, mat);
     newMesh.position.set(controls.posX, controls.posY, controls.posZ);
     newMesh.rotation.set(controls.rotX, controls.rotY, controls.rotZ);
@@ -1250,7 +1073,6 @@ export default function DoorScene({
     farsiMeshRef.current = newMesh;
   };
 
-  // Regenerate Farsi geometry when geometry controls change
   useEffect(() => {
     const mesh = farsiMeshRef.current;
     if (!mesh) return;
@@ -1266,65 +1088,22 @@ export default function DoorScene({
     farsiText,
   ]);
 
-  // Update Farsi text properties when non-geometry controls change
   useEffect(() => {
     const mesh = farsiMeshRef.current;
     if (!mesh) return;
 
     const controls = farsiTextControls as any;
-
     mesh.position.set(controls.posX, controls.posY, controls.posZ);
     mesh.rotation.set(controls.rotX, controls.rotY, controls.rotZ);
 
-    // Update vertical perspective distortion
-    const originalGeom = farsiOriginalGeometryRef.current;
-    if (originalGeom && mesh.geometry) {
-      const originalPositions = originalGeom.attributes.position;
-      const currentPositions = mesh.geometry.attributes.position;
+    updatePerspectiveDistortion(
+      mesh,
+      farsiOriginalGeometryRef.current,
+      controls.verticalPerspective
+    );
 
-      for (let i = 0; i < originalPositions.count; i++) {
-        currentPositions.setXYZ(
-          i,
-          originalPositions.getX(i),
-          originalPositions.getY(i),
-          originalPositions.getZ(i)
-        );
-      }
-
-      if (!mesh.geometry.boundingBox) {
-        mesh.geometry.computeBoundingBox();
-      }
-      const bbox = mesh.geometry.boundingBox!;
-      const height = bbox.max.y - bbox.min.y;
-      const centerY = (bbox.max.y + bbox.min.y) / 2;
-
-      for (let i = 0; i < currentPositions.count; i++) {
-        const y = currentPositions.getY(i);
-        const normalizedY = height > 0 ? (y - centerY) / (height / 2) : 0;
-        const scaleX = 1 + controls.verticalPerspective * normalizedY;
-        const x = currentPositions.getX(i);
-        currentPositions.setX(i, x * scaleX);
-      }
-      currentPositions.needsUpdate = true;
-      mesh.geometry.computeBoundingBox();
-    }
-
-    // Update material properties
     if (mesh.material instanceof THREE.MeshStandardMaterial) {
-      mesh.material.color.set(controls.color);
-      mesh.material.opacity = controls.opacity;
-      mesh.material.transparent = true;
-      mesh.material.side = THREE.FrontSide;
-      mesh.material.depthTest = true;
-      mesh.material.depthWrite = true;
-      mesh.material.roughness = controls.roughness;
-      mesh.material.metalness = controls.metalness;
-      mesh.material.emissive.set(
-        controls.emissiveEnabled ? controls.color : 0x000000
-      );
-      mesh.material.emissiveIntensity = controls.emissiveEnabled
-        ? controls.emissiveIntensity
-        : 0;
+      updateMaterialProperties(mesh.material, controls);
     }
   }, [farsiTextControls]);
 
