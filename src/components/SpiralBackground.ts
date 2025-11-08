@@ -31,6 +31,7 @@ export function createSpiralBackground(
     uCenter0: { value: new THREE.Vector2(0.25, 0.5) },
     uCenter1: { value: new THREE.Vector2(0.75, 0.5) },
     uHoleRadius: { value: new THREE.Vector2(0.08, 0.08) },
+    uHoleRadiusOuter: { value: new THREE.Vector2(0.11, 0.11) },
     uSpeed: { value: 0.7 },
     uBands: { value: 20.0 },
     uContrast: { value: 1.0 },
@@ -53,7 +54,8 @@ export function createSpiralBackground(
   uniform vec2 uResolution;
   uniform vec2 uCenter0;
   uniform vec2 uCenter1;
-  uniform vec2 uHoleRadius;   // now a vec2
+    uniform vec2 uHoleRadius;   // now a vec2
+    uniform vec2 uHoleRadiusOuter;
   uniform float uSpeed;
   uniform float uBands;
   uniform float uContrast;
@@ -97,28 +99,18 @@ export function createSpiralBackground(
     
     // Elliptical holes (independent x/y scaling) - both portals use same size/shape
     vec2 hp0 = uv - uCenter0;
-    hp0.x /= uHoleRadius.x;
-    hp0.y /= uHoleRadius.y;
-    float holeDist0 = length(hp0);
+    hp0.x /= uHoleRadiusOuter.x;
+    hp0.y /= uHoleRadiusOuter.y;
+    float outer0 = length(hp0);
     
     vec2 hp1 = uv - uCenter1;
-    hp1.x /= uHoleRadius.x;
-    hp1.y /= uHoleRadius.y;
-    float holeDist1 = length(hp1);
+    hp1.x /= uHoleRadiusOuter.x;
+    hp1.y /= uHoleRadiusOuter.y;
+    float outer1 = length(hp1);
 
-    // Use minimum distance for single calculation (both portals same size/shape)
-    float holeDist = min(holeDist0, holeDist1);
+    float outerDist = min(outer0, outer1);
 
-    float alpha = 1.0;
-    if (holeDist < 1.0) alpha = 0.0;
-
-    // Soft fade edges - extended fade range to allow portal brush border to show through
-    // Same fade function for both portals (same size/shape)
-    float fade = smoothstep(1.05, 1.4, holeDist);
-    // Keep alpha lower in the brush border zone (between 1.0 and 1.12) to allow brush to show
-    float brushZoneFactor = step(1.0, holeDist) * step(holeDist, 1.12); // 1.0 if in brush zone, 0.0 otherwise
-    // In brush zone, reduce alpha moderately to allow portal brush to show through
-    alpha *= mix(fade, fade * 0.65, brushZoneFactor);
+    float alpha = smoothstep(1.0, 1.35, outerDist);
 
     // final color
     vec3 color = mix(vec3(0.0), vec3(1.0), band);
@@ -177,6 +169,9 @@ export function createSpiralBackground(
 
     // Compute independent width/height hole scaling
     setPortalHoleRadius(uniforms.uHoleRadius.value, w, h);
+    uniforms.uHoleRadiusOuter.value
+      .copy(uniforms.uHoleRadius.value)
+      .multiplyScalar(1.35);
 
     // Update plane geometry size to match new aspect ratio
     const fov = (perspectiveCamera.fov * Math.PI) / 180;

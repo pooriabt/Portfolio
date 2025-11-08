@@ -84,11 +84,11 @@ float getBrushLayerWithWidth(
   float isInside = step(radialOffset, 0.0);
 
   // Visibility mask for strokes on the inside of the ellipse
-  float insideRange = smoothstep(-0.05 * w, -0.02 * w, edgeDist) *
-    smoothstep(-0.005 * w, -0.02 * w, edgeDist);
+  float insideRange = smoothstep(-0.08 * w, -0.005 * w, edgeDist) *
+    (1.0 - smoothstep(-0.02 * w, 0.0, edgeDist));
   // Visibility mask for strokes on the outside of the ellipse (expanded to allow wider bleed)
-  float outsideRange = smoothstep(0.12 * w, 0.01 * w, edgeDist) *
-    smoothstep(0.01 * w, 0.12 * w, edgeDist);
+  float outsideRange = smoothstep(0.0, 0.12 * w, edgeDist) *
+    (1.0 - smoothstep(0.12 * w, 0.22 * w, edgeDist));
   // Blend inside/outside masks depending on stroke side
   float validRange = mix(outsideRange, insideRange, isInside);
 
@@ -171,9 +171,9 @@ float getBrushLayerWithWidth(
   // Fade stroke if too far inside the portal
   float insideFalloff = smoothstep(-0.05 * w, -0.015 * w, edgeDist);
   // Fade stroke if too far outside the portal
-  float outsideFalloff = smoothstep(0.025 * w, 0.0, edgeDist);
+  float outsideFalloff = 1.0 - smoothstep(0.0, 0.06 * w, edgeDist);
   // Blend inside/outside falloffs depending on sign of edgeDist
-  float falloff = mix(outsideFalloff, insideFalloff, step(0.0, edgeDist));
+  float falloff = mix(insideFalloff, outsideFalloff, step(0.0, edgeDist));
 
   // Apply falloff attenuation
   lineAlpha *= falloff;
@@ -194,22 +194,52 @@ float getBrushEffect(
   float widthScale
 ) {
   // Innermost thin stroke slightly inside the portal
-  float line1Width = 0.0052;
-  float line1Offset = -0.5 * line1Width * widthScale;
-  float line1 = getBrushLayerWithWidth(
+  float lineInnerWidth = 0.0052;
+  float lineInnerOffset = -0.4 * widthScale * lineInnerWidth;
+  float lineInner = getBrushLayerWithWidth(
     screenUv,
     center,
     holeRadius,
     angle,
     seed,
-    line1Offset,
+    lineInnerOffset,
     0.0,
-    line1Width,
+    lineInnerWidth,
     widthScale
   );
 
-  // Use the primary line as the base intensity
-  float totalBrush = line1;
+  // Primary thick stroke that lives inside the ring mesh area (outside the portal ellipse)
+  float lineOuterWidth = 0.018;
+  float lineOuterOffset = 0.08 * widthScale;
+  float lineOuter = getBrushLayerWithWidth(
+    screenUv,
+    center,
+    holeRadius,
+    angle,
+    seed + 1.23,
+    lineOuterOffset,
+    0.35,
+    lineOuterWidth,
+    widthScale * 1.3
+  );
+
+  // Secondary outer stroke for softer feathered edge further into the ring mesh
+  float lineFeatherWidth = 0.026;
+  float lineFeatherOffset = 0.16 * widthScale;
+  float lineFeather = getBrushLayerWithWidth(
+    screenUv,
+    center,
+    holeRadius,
+    angle,
+    seed + 2.37,
+    lineFeatherOffset,
+    -0.25,
+    lineFeatherWidth,
+    widthScale * 0.9
+  );
+
+  // Combine strokes - prioritize maximum intensity so outer strokes dominate where present
+  float totalBrush = max(lineInner, max(lineOuter, lineFeather));
 
   // Compute angle around ellipse for gap modulation
   float currentAngle = atan((screenUv.y - center.y) / holeRadius.y, (screenUv.x - center.x) / holeRadius.x);

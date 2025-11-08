@@ -355,19 +355,15 @@ export default function DoorScene({
       useDigitalRain: true,
     });
 
+    // Adjustable scaling factors for both portals (affects texture ellipse and ring)
+    const portalInnerScale = new THREE.Vector2(0.75, 0.72);
+    const portalRingScale = new THREE.Vector2(1.12, 1.08);
+    const portalBrushOuterScalar = 2.2;
+    const portalGroupScale = 0.85;
+
     // Set brush rotation speeds - faster for both portals
     leftPortal.uniforms.uBrushRotation.value = 0.7; // Faster clockwise rotation
     rightPortal.uniforms.uBrushRotation.value = -0.8; // Faster counter-clockwise rotation
-
-    // Store initial portal scale for scroll animation
-    let initialPortalScale = { x: 1, y: 1, z: 1 };
-    const startScale = 0.3; // Start small (30% size)
-
-    // Set initial portal scale to small (will animate up during scroll)
-    // Scale the entire mesh, which includes brushMesh as child
-    // In Three.js, scaling a parent automatically scales all children
-    leftPortal.mesh.scale.setScalar(startScale);
-    rightPortal.mesh.scale.setScalar(startScale);
 
     // Ensure brushMesh starts with scale (1,1,1) so it scales proportionally with parent
     if (leftPortal.brushMesh) {
@@ -377,7 +373,38 @@ export default function DoorScene({
       rightPortal.brushMesh.scale.setScalar(1.0);
     }
 
-    scene.add(leftPortal.mesh, rightPortal.mesh);
+    const tmpBaseHole = new THREE.Vector2();
+    const tmpInnerHole = new THREE.Vector2();
+    const tmpRingHole = new THREE.Vector2();
+    const computeBrushWidth = (
+      innerHole: THREE.Vector2,
+      ringHole: THREE.Vector2
+    ) => {
+      const ratio = Math.max(
+        ringHole.x / Math.max(innerHole.x, 1e-6),
+        ringHole.y / Math.max(innerHole.y, 1e-6)
+      );
+      const unclamped = (ratio - 1.0) / 0.02 + 1.0;
+      return Math.min(9.0, Math.max(1.0, unclamped));
+    };
+
+    const leftPortalGroup = new THREE.Group();
+    leftPortalGroup.name = "LeftPortal_Group";
+    leftPortalGroup.add(leftPortal.mesh);
+    if (leftPortal.brushMesh) {
+      leftPortalGroup.add(leftPortal.brushMesh);
+    }
+    leftPortalGroup.scale.setScalar(portalGroupScale);
+
+    const rightPortalGroup = new THREE.Group();
+    rightPortalGroup.name = "RightPortal_Group";
+    rightPortalGroup.add(rightPortal.mesh);
+    if (rightPortal.brushMesh) {
+      rightPortalGroup.add(rightPortal.brushMesh);
+    }
+    rightPortalGroup.scale.setScalar(portalGroupScale);
+
+    scene.add(leftPortalGroup, rightPortalGroup);
 
     let spiral: ReturnType<typeof createSpiralBackground> | null = null;
     try {
@@ -385,8 +412,8 @@ export default function DoorScene({
         scene,
         camera,
         renderer,
-        leftPortal.mesh,
-        rightPortal.mesh
+        leftPortalGroup,
+        rightPortalGroup
       );
     } catch (err) {
       console.error("Failed to create spiral background:", err);
@@ -588,44 +615,89 @@ export default function DoorScene({
         );
       }
 
-      const holeWidth = (leftPortal.uniforms.uHoleRadius.value as THREE.Vector2)
-        .x;
-      const holeHeight = (
-        leftPortal.uniforms.uHoleRadius.value as THREE.Vector2
-      ).y;
+      tmpBaseHole.copy(leftPortal.uniforms.uHoleRadius.value as THREE.Vector2);
+      tmpInnerHole
+        .copy(tmpBaseHole)
+        .multiply(portalInnerScale)
+        .multiplyScalar(portalGroupScale);
+      tmpRingHole.copy(tmpInnerHole).multiply(portalRingScale);
 
       // Compute frustum dimensions at portal depth
-      const distance = Math.abs(camera.position.z - leftPortal.mesh.position.z);
+      const distance = Math.abs(camera.position.z - leftPortalGroup.position.z);
       const vFov = (camera.fov * Math.PI) / 180;
       const frustumHeight = 2 * distance * Math.tan(vFov / 2);
       const frustumWidth = frustumHeight * camera.aspect;
 
-      const portalWidthWorld = frustumWidth * holeWidth * 2;
-      const portalHeightWorld = frustumHeight * holeHeight * 2;
+      // Force portal width to occupy exactly 1/3 of the viewport width
+      const screenWidthPixels =
+        typeof window !== "undefined" && window.screen
+          ? window.screen.width
+          : w;
+      const clampedViewportWidth = Math.min(w, screenWidthPixels / 2);
+      const widthRatio = clampedViewportWidth / Math.max(w, 1);
+      const frustumWidthAtClamp = frustumWidth * widthRatio;
+      const targetPortalWidthWorld = frustumWidthAtClamp / 3;
+      const currentPortalWidthWorld = frustumWidth * tmpInnerHole.x * 2;
+      const widthScale =
+        targetPortalWidthWorld / Math.max(currentPortalWidthWorld, 1e-6);
+      tmpInnerHole.multiplyScalar(widthScale);
+      tmpRingHole.multiplyScalar(widthScale);
 
-      initialPortalScale.x = portalWidthWorld;
-      initialPortalScale.y = portalHeightWorld;
-      initialPortalScale.z = 1;
+      leftPortal.uniforms.uHoleRadius.value.copy(tmpInnerHole);
+      rightPortal.uniforms.uHoleRadius.value.copy(tmpInnerHole);
 
-      // Determine spacing between portals using UV gap
-      const gapUv = Math.max(0.06, holeWidth * 0.8);
-      const centerDistanceUv = holeWidth * 2 + gapUv;
-      const centerOffsetWorld = (frustumWidth * centerDistanceUv) / 2;
+      const brushWidthValue = computeBrushWidth(tmpInnerHole, tmpRingHole);
+      leftPortal.uniforms.uBrushWidth.value = brushWidthValue;
+      rightPortal.uniforms.uBrushWidth.value = brushWidthValue;
 
-      leftPortal.mesh.position.set(-centerOffsetWorld, 0, 0);
-      rightPortal.mesh.position.set(centerOffsetWorld, 0, 0);
+      leftPortal.uniforms.uBrushOuterScale.value = portalBrushOuterScalar;
+      rightPortal.uniforms.uBrushOuterScale.value = portalBrushOuterScalar;
 
-      if (spiral) spiral.resize();
+      const portalWidthWorld = frustumWidth * tmpInnerHole.x * 2;
+      const portalHeightWorld = frustumHeight * tmpInnerHole.y * 2;
+      const meshScaleX = portalWidthWorld / portalGroupScale;
+      const meshScaleY = portalHeightWorld / portalGroupScale;
+
+      leftPortal.mesh.scale.set(meshScaleX, meshScaleY, 1);
+      rightPortal.mesh.scale.set(meshScaleX, meshScaleY, 1);
+
+      if (leftPortal.brushMesh) {
+        leftPortal.brushMesh.scale.set(meshScaleX, meshScaleY, 1);
+      }
+      if (rightPortal.brushMesh) {
+        rightPortal.brushMesh.scale.set(meshScaleX, meshScaleY, 1);
+      }
+
+      // Determine spacing: divide view width into 9 equal units (3+3+1+1+1)
+      const portalCenterOffsetWorld = frustumWidthAtClamp * (2 / 9);
+      leftPortalGroup.position.set(-portalCenterOffsetWorld, 0, 0);
+      rightPortalGroup.position.set(portalCenterOffsetWorld, 0, 0);
+
+      if (spiral) {
+        spiral.resize();
+        if (spiral.material?.uniforms) {
+          const spiralHole = spiral.material.uniforms.uHoleRadius
+            ?.value as THREE.Vector2;
+          const spiralOuter = spiral.material.uniforms.uHoleRadiusOuter
+            ?.value as THREE.Vector2;
+          if (spiralHole) {
+            spiralHole.copy(tmpInnerHole);
+          }
+          if (spiralOuter) {
+            spiralOuter.copy(tmpRingHole);
+          }
+        }
+      }
 
       // Update centers immediately after resize
       projectObjectToScreenUv(
-        leftPortal.mesh,
+        leftPortalGroup,
         camera,
         leftPortal.uniforms.uCenter.value as THREE.Vector2,
         tmpVec3
       );
       projectObjectToScreenUv(
-        rightPortal.mesh,
+        rightPortalGroup,
         camera,
         rightPortal.uniforms.uCenter.value as THREE.Vector2,
         tmpVec3
@@ -637,45 +709,19 @@ export default function DoorScene({
     renderer.domElement.addEventListener("pointermove", onPointerMove);
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
 
-    const portalScaleTimeline = gsap.timeline({
-      scrollTrigger: {
-        trigger: mount,
-        start: "top top",
-        end: "bottom top",
-        scrub: 1,
-      },
-    });
-
-    portalScaleTimeline.to(leftPortal.mesh.scale, {
-      x: initialPortalScale.x,
-      y: initialPortalScale.y,
-      z: initialPortalScale.z,
-      duration: 1,
-    });
-    portalScaleTimeline.to(
-      rightPortal.mesh.scale,
-      {
-        x: initialPortalScale.x,
-        y: initialPortalScale.y,
-        z: initialPortalScale.z,
-        duration: 1,
-      },
-      "<"
-    );
-
     const clock = new THREE.Clock();
     let rafId = 0;
     function animate() {
       const elapsed = clock.getElapsedTime();
 
       projectObjectToScreenUv(
-        leftPortal.mesh,
+        leftPortalGroup,
         camera,
         leftPortal.uniforms.uCenter.value as THREE.Vector2,
         tmpVec3
       );
       projectObjectToScreenUv(
-        rightPortal.mesh,
+        rightPortalGroup,
         camera,
         rightPortal.uniforms.uCenter.value as THREE.Vector2,
         tmpVec3

@@ -34,7 +34,7 @@ export function createPortalEllipse(params: {
     uShowClickEllipse: { value: 0.0 }, // Show click ellipse overlay (0 = hide, 1 = show)
     uBrushWidth: { value: params.brushWidth ?? 5.0 },
     uRenderBrushOnly: { value: 0.0 },
-    uBrushOuterScale: { value: params.brushOuterScale ?? 5.0 },
+    uBrushOuterScale: { value: params.brushOuterScale ?? 1.2 },
   };
 
   const vertex = glsl`
@@ -170,38 +170,34 @@ export function createPortalEllipse(params: {
 
       // Irregular oil painting brush border - smoothly spinning around ellipse
       // Smooth rotation - use time directly for continuous animation
-      float brushAngle = uTime * uBrushRotation;
-      
-      // Calculate mesh boundary in UV space to align brush inner edge with mesh border
-      // Mesh boundary is at UV distance 0.5 from center (circle radius 0.5)
-      // Convert UV boundary to screen-space: mesh UV boundary corresponds to portal ellipse size
-      // Brush inner edge should align with mesh border (portal boundary), outer edge extends beyond
-      vec2 uvCentered = vUv - 0.5;
-      float uvDistFromCenter = length(uvCentered) * 2.0; // Normalize: max distance from center in UV is 0.707, *2 = ~1.414
-      
-      // Calculate mesh boundary ellipse in screen space
-      // When uvDistFromCenter = 1.0, we're at mesh boundary (radius 0.5 in UV = normalized 1.0)
-      // At mesh boundary, the screen-space ellipse should match uHoleRadius
+      float brushEnabled = step(0.5, uRenderBrushOnly);
+      float brushAngle = 0.0;
+      float brushIntensity = 0.0;
+      float brushZoneFactor = 0.0;
       float brushRadiusScale = 1.0 + clamp(uBrushWidth - 1.0, 0.0, 8.0) * 0.02;
       vec2 meshBoundaryRadius = uHoleRadius * brushRadiusScale;
       
-      // Get irregular brush effect (frayed edges, varying thickness, gaps)
-      // Brush inner edge aligns with mesh boundary (portal ellipse), extends outward
-      float brushIntensity = getBrushEffect(
-        screenUv,
-        uCenter,
-        meshBoundaryRadius,
-        brushAngle,
-        uHue * 10.0,
-        uBrushWidth
-      );
+      if (brushEnabled > 0.5) {
+        brushAngle = uTime * uBrushRotation;
+        brushIntensity = getBrushEffect(
+          screenUv,
+          uCenter,
+          meshBoundaryRadius,
+          brushAngle,
+          uHue * 10.0,
+          uBrushWidth
+        );
+        brushZoneFactor = step(0.01, brushIntensity);
+      } else {
+        meshBoundaryRadius = uHoleRadius;
+      }
       
       // Ellipse edge fade - extend beyond 1.0 for brush effect to cover SpiralBackground
       // Brush should extend with half width outside portal, so fade starts later
-      float brushZoneFactor = step(0.01, brushIntensity); // 1.0 if in brush zone, 0.0 otherwise
+      float brushZoneFactorMix = brushZoneFactor * brushEnabled;
       float normalFade = smoothstep(uBrushOuterScale + 0.3, 0.98, ellipseDist); // Extend fade range for brush extension
       float brushZoneFade = smoothstep(uBrushOuterScale + 0.3, 0.88, ellipseDist); // Allow brush to extend further out
-      float ellipseFade = mix(normalFade, brushZoneFade, brushZoneFactor);
+      float ellipseFade = mix(normalFade, brushZoneFade, brushZoneFactorMix);
       // Apply clipping fade to remove rectangular clipping - fade out beyond clipping boundary
       outAlpha *= ellipseFade * uAlpha ;
       
@@ -229,10 +225,12 @@ export function createPortalEllipse(params: {
       vec3 brushColor = vec3(grayValue, grayValue, grayValue);
       
       // Mix brush with existing color - darker appearance
-      float brushMix = brushIntensity * 0.75; // Slightly higher opacity to maintain visibility with darker color
-      outCol = mix(outCol, brushColor, brushMix);
+      if (brushEnabled > 0.5) {
+        float brushMix = brushIntensity * 0.75; // Slightly higher opacity to maintain visibility with darker color
+        outCol = mix(outCol, brushColor, brushMix);
       // Ensure brush shows even if base alpha is low (for gap coverage) - reduced opacity
-      outAlpha = max(outAlpha, brushIntensity * uAlpha * 0.7);
+        outAlpha = max(outAlpha, brushIntensity * uAlpha * 0.7);
+      }
 
       // Allow brush to render outside mesh boundary by not making border transparent
       // The brush will extend beyond mesh UV bounds, but since we use screen-space coordinates
@@ -286,12 +284,15 @@ export function createPortalEllipse(params: {
   const geo = new THREE.CircleGeometry(0.5, segments); // Base radius 0.5 (diameter 1.0)
   const mesh = new THREE.Mesh(geo, mat);
 
-
   const brushOuterScale = uniforms.uBrushOuterScale.value as number;
   const brushInnerScale = 1.0;
   const brushOuterRadius = 0.5 * brushOuterScale;
   const brushInnerRadius = 0.5 * brushInnerScale;
-  const brushGeo = new THREE.RingGeometry(brushInnerRadius, brushOuterRadius, segments);
+  const brushGeo = new THREE.RingGeometry(
+    brushInnerRadius,
+    brushOuterRadius,
+    segments
+  );
   const brushUniforms = THREE.UniformsUtils.clone(mat.uniforms as any);
   const sharedUniformKeys = [
     "uTime",
