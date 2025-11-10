@@ -62,6 +62,9 @@ export default function DoorScene({
     baseBlockWidth: number;
     portalHeightCss: number;
   } | null>(null);
+  const layoutCategoryRef = useRef<"mobile" | "portrait" | "landscape" | null>(
+    null
+  );
 
   function applyPerspectiveDistortion(
     geometry: THREE.BufferGeometry,
@@ -278,7 +281,7 @@ export default function DoorScene({
       step: 0.01,
     },
     rotY: {
-      value: 0.05,
+      value: 0.0,
       min: -3.14,
       max: 3.14,
       step: 0.01,
@@ -662,6 +665,16 @@ export default function DoorScene({
       );
       const aspectRatio = viewportWidthCss / viewportHeightCss;
       const isMobileViewport = viewportWidthCss <= 600;
+      const layoutCategory = isMobileViewport
+        ? "mobile"
+        : aspectRatio <= 1
+        ? "portrait"
+        : "landscape";
+
+      if (layoutCategoryRef.current !== layoutCategory) {
+        squareBaselineRef.current = null;
+        layoutCategoryRef.current = layoutCategory;
+      }
 
       const screenWidth =
         typeof window !== "undefined" && window.screen
@@ -756,6 +769,13 @@ export default function DoorScene({
             columnWidthCss * 2 +
             (columnWidthCss + middleColumnExtraCss);
         }
+
+        squareBaselineRef.current = {
+          portalWidthCss,
+          columnWidthCss,
+          baseBlockWidth,
+          portalHeightCss,
+        };
       }
 
       let middleColumnCss = columnWidthCss + middleColumnExtraCss;
@@ -770,6 +790,13 @@ export default function DoorScene({
         middleColumnExtraCss *= scaleToFit;
         middleColumnCss = columnWidthCss + middleColumnExtraCss;
       }
+
+      squareBaselineRef.current = {
+        portalWidthCss,
+        columnWidthCss,
+        baseBlockWidth,
+        portalHeightCss,
+      };
 
       const requiredWidth =
         portalWidthCss * 2 + columnWidthCss * 2 + middleColumnCss;
