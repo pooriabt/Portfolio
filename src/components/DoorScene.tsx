@@ -17,6 +17,10 @@ import { createSpiralBackground } from "./SpiralBackground";
 import { createPortalEllipse } from "./createPortalEllipse";
 import { projectObjectToScreenUv, setPortalHoleRadius } from "./portalMath";
 
+const MIDDLE_COLUMN_EXTRA = 30;
+const MOBILE_GAP_RATIO = 0.08; // fraction of viewport width
+const MOBILE_HEIGHT_RATIO = 0.45; // fraction of viewport height
+
 /**
  * Rick and Morty style portal doors
  * - 2D elliptical portals instead of 3D doors
@@ -29,13 +33,19 @@ type DoorSceneProps = {
   farsiText?: string;
   englishFontJsonPath?: string;
   farsiFontPath?: string;
+  containerHeight?: number | string;
+  containerStyle?: React.CSSProperties;
+  sceneOffsetY?: number;
 };
 
 export default function DoorScene({
   englishText = "LOVE",
-  farsiText = "پوریا برادران توکلی",
+  farsiText = "توکلی",
   englishFontJsonPath = "/assets/fonts/helvetiker_regular.typeface.json",
   farsiFontPath = "/assets/fonts/Mj Silicon Bold.typeface.json",
+  containerHeight = "200vh",
+  containerStyle,
+  sceneOffsetY = 0,
 }: DoorSceneProps = {}) {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const englishMeshRef = useRef<THREE.Mesh | null>(null);
@@ -46,6 +56,12 @@ export default function DoorScene({
   const farsiOriginalGeometryRef = useRef<THREE.BufferGeometry | null>(null);
   const farsiFontRef = useRef<any>(null);
   const rtlTextPluginRef = useRef<any>(null);
+  const squareBaselineRef = useRef<{
+    portalWidthCss: number;
+    columnWidthCss: number;
+    baseBlockWidth: number;
+    portalHeightCss: number;
+  } | null>(null);
 
   function applyPerspectiveDistortion(
     geometry: THREE.BufferGeometry,
@@ -307,6 +323,9 @@ export default function DoorScene({
     if (!mount) return;
 
     const scene = new THREE.Scene();
+    const sceneRoot = new THREE.Group();
+    sceneRoot.position.y = sceneOffsetY;
+    scene.add(sceneRoot);
     const width = mount.clientWidth || window.innerWidth;
     const height = mount.clientHeight || window.innerHeight;
 
@@ -404,7 +423,7 @@ export default function DoorScene({
     }
     rightPortalGroup.scale.setScalar(portalGroupScale);
 
-    scene.add(leftPortalGroup, rightPortalGroup);
+    sceneRoot.add(leftPortalGroup, rightPortalGroup);
 
     let spiral: ReturnType<typeof createSpiralBackground> | null = null;
     try {
@@ -413,7 +432,8 @@ export default function DoorScene({
         camera,
         renderer,
         leftPortalGroup,
-        rightPortalGroup
+        rightPortalGroup,
+        { parent: sceneRoot }
       );
     } catch (err) {
       console.error("Failed to create spiral background:", err);
@@ -628,20 +648,165 @@ export default function DoorScene({
       const frustumHeight = 2 * distance * Math.tan(vFov / 2);
       const frustumWidth = frustumHeight * camera.aspect;
 
-      // Force portal width to occupy exactly 1/3 of the viewport width
-      const screenWidthPixels =
+      // Determine 5-column layout sizing based on viewport aspect
+      const viewportWidthCss = Math.max(
+        1,
+        window.innerWidth || 0,
+        mount.clientWidth || 0,
+        renderer.domElement.clientWidth || 0
+      );
+      const viewportHeightCss = Math.max(
+        1,
+        window.innerHeight || 0,
+        renderer.domElement.clientHeight || 0
+      );
+      const aspectRatio = viewportWidthCss / viewportHeightCss;
+      const isMobileViewport = viewportWidthCss <= 600;
+
+      const screenWidth =
         typeof window !== "undefined" && window.screen
-          ? window.screen.width
-          : w;
-      const clampedViewportWidth = Math.min(w, screenWidthPixels / 2);
-      const widthRatio = clampedViewportWidth / Math.max(w, 1);
-      const frustumWidthAtClamp = frustumWidth * widthRatio;
-      const targetPortalWidthWorld = frustumWidthAtClamp / 3;
+          ? window.screen.width || viewportWidthCss
+          : viewportWidthCss;
+      const screenHeight =
+        typeof window !== "undefined" && window.screen
+          ? window.screen.height || viewportHeightCss
+          : viewportHeightCss;
+
+      let middleColumnExtraCss = isMobileViewport
+        ? viewportWidthCss * MOBILE_GAP_RATIO
+        : MIDDLE_COLUMN_EXTRA;
+      let portalWidthCss: number;
+      let columnWidthCss: number;
+      let baseBlockWidth: number;
+      let portalHeightCss: number;
+      let heightWidthRatio =
+        squareBaselineRef.current &&
+        squareBaselineRef.current.portalWidthCss > 0
+          ? squareBaselineRef.current.portalHeightCss /
+            squareBaselineRef.current.portalWidthCss
+          : 0;
+
+      if (isMobileViewport) {
+        baseBlockWidth = viewportWidthCss;
+        portalWidthCss = baseBlockWidth / 3;
+        columnWidthCss = baseBlockWidth / 9;
+        const baselineHeight = Math.min(
+          viewportHeightCss * MOBILE_HEIGHT_RATIO,
+          screenHeight / 2
+        );
+        heightWidthRatio = baselineHeight / Math.max(portalWidthCss, 1);
+        portalHeightCss = baselineHeight;
+
+        squareBaselineRef.current = {
+          portalWidthCss,
+          columnWidthCss,
+          baseBlockWidth,
+          portalHeightCss,
+        };
+      } else if (aspectRatio <= 1) {
+        baseBlockWidth = Math.min(viewportWidthCss, screenWidth / 2);
+        portalWidthCss = baseBlockWidth / 3;
+        columnWidthCss = baseBlockWidth / 9;
+
+        const baselineHeight = viewportHeightCss / 2;
+        heightWidthRatio = baselineHeight / Math.max(portalWidthCss, 1);
+        portalHeightCss = Math.min(baselineHeight, screenHeight / 2);
+
+        squareBaselineRef.current = {
+          portalWidthCss,
+          columnWidthCss,
+          baseBlockWidth,
+          portalHeightCss,
+        };
+      } else {
+        let baseline = squareBaselineRef.current;
+        if (!baseline) {
+          const fallbackBlock = Math.min(viewportWidthCss, screenWidth / 2);
+          const fallbackHeight = Math.min(
+            viewportHeightCss / 2,
+            screenHeight / 2
+          );
+          baseline = {
+            portalWidthCss: fallbackBlock / 3,
+            columnWidthCss: fallbackBlock / 9,
+            baseBlockWidth: fallbackBlock,
+            portalHeightCss: fallbackHeight,
+          };
+          squareBaselineRef.current = baseline;
+        }
+        portalWidthCss = baseline.portalWidthCss;
+        columnWidthCss = baseline.columnWidthCss;
+        baseBlockWidth = baseline.baseBlockWidth;
+        portalHeightCss = baseline.portalHeightCss;
+        heightWidthRatio =
+          baseline.portalWidthCss > 0
+            ? baseline.portalHeightCss / baseline.portalWidthCss
+            : heightWidthRatio;
+
+        const baselineMiddleColumnCss = columnWidthCss + middleColumnExtraCss;
+        const requiredWidthBaseline =
+          portalWidthCss * 2 + columnWidthCss * 2 + baselineMiddleColumnCss;
+        if (requiredWidthBaseline > viewportWidthCss) {
+          const scale = viewportWidthCss / requiredWidthBaseline;
+          portalWidthCss *= scale;
+          columnWidthCss *= scale;
+          middleColumnExtraCss *= scale;
+          baseBlockWidth =
+            portalWidthCss * 2 +
+            columnWidthCss * 2 +
+            (columnWidthCss + middleColumnExtraCss);
+        }
+      }
+
+      let middleColumnCss = columnWidthCss + middleColumnExtraCss;
+
+      const requiredWidthCurrent =
+        portalWidthCss * 2 + columnWidthCss * 2 + middleColumnCss;
+      if (requiredWidthCurrent > viewportWidthCss) {
+        const scaleToFit =
+          viewportWidthCss / Math.max(requiredWidthCurrent, 1e-6);
+        portalWidthCss *= scaleToFit;
+        columnWidthCss *= scaleToFit;
+        middleColumnExtraCss *= scaleToFit;
+        middleColumnCss = columnWidthCss + middleColumnExtraCss;
+      }
+
+      const requiredWidth =
+        portalWidthCss * 2 + columnWidthCss * 2 + middleColumnCss;
+      const outerFillerCss = Math.max(
+        0,
+        (viewportWidthCss - requiredWidth) / 2
+      );
+
+      const leftColumnCss = columnWidthCss;
+
+      const leftCenterCss = outerFillerCss + leftColumnCss + portalWidthCss / 2;
+      const rightCenterCss =
+        viewportWidthCss -
+        (outerFillerCss + leftColumnCss + portalWidthCss / 2);
+
+      const portalWidthFraction =
+        portalWidthCss / Math.max(viewportWidthCss, 1);
+      const targetPortalWidthWorld = frustumWidth * portalWidthFraction;
       const currentPortalWidthWorld = frustumWidth * tmpInnerHole.x * 2;
       const widthScale =
         targetPortalWidthWorld / Math.max(currentPortalWidthWorld, 1e-6);
-      tmpInnerHole.multiplyScalar(widthScale);
-      tmpRingHole.multiplyScalar(widthScale);
+
+      const portalHeightCssClamped = Math.min(
+        portalHeightCss,
+        viewportHeightCss
+      );
+      const portalHeightFraction =
+        portalHeightCssClamped / Math.max(viewportHeightCss, 1);
+      const targetPortalHeightWorld = frustumHeight * portalHeightFraction;
+      const currentPortalHeightWorld = frustumHeight * tmpInnerHole.y * 2;
+      const heightScale =
+        targetPortalHeightWorld / Math.max(currentPortalHeightWorld, 1e-6);
+
+      tmpInnerHole.x *= widthScale;
+      tmpRingHole.x *= widthScale;
+      tmpInnerHole.y *= heightScale;
+      tmpRingHole.y *= heightScale;
 
       leftPortal.uniforms.uHoleRadius.value.copy(tmpInnerHole);
       rightPortal.uniforms.uHoleRadius.value.copy(tmpInnerHole);
@@ -668,10 +833,13 @@ export default function DoorScene({
         rightPortal.brushMesh.scale.set(meshScaleX, meshScaleY, 1);
       }
 
-      // Determine spacing: divide view width into 9 equal units (3+3+1+1+1)
-      const portalCenterOffsetWorld = frustumWidthAtClamp * (2 / 9);
-      leftPortalGroup.position.set(-portalCenterOffsetWorld, 0, 0);
-      rightPortalGroup.position.set(portalCenterOffsetWorld, 0, 0);
+      // Position portals according to column layout
+      const leftCenterFraction = leftCenterCss / viewportWidthCss;
+      const rightCenterFraction = rightCenterCss / viewportWidthCss;
+      const leftCenterWorld = (leftCenterFraction - 0.5) * frustumWidth;
+      const rightCenterWorld = (rightCenterFraction - 0.5) * frustumWidth;
+      leftPortalGroup.position.set(leftCenterWorld, 0, 0);
+      rightPortalGroup.position.set(rightCenterWorld, 0, 0);
 
       if (spiral) {
         spiral.resize();
@@ -702,6 +870,24 @@ export default function DoorScene({
         rightPortal.uniforms.uCenter.value as THREE.Vector2,
         tmpVec3
       );
+
+      if (spiral?.material?.uniforms) {
+        const spiralUniforms = spiral.material.uniforms;
+        const leftCenter = leftPortal.uniforms.uCenter.value as THREE.Vector2;
+        const rightCenter = rightPortal.uniforms.uCenter.value as THREE.Vector2;
+        const spiralCenter0 = spiralUniforms.uCenter0?.value as
+          | THREE.Vector2
+          | undefined;
+        const spiralCenter1 = spiralUniforms.uCenter1?.value as
+          | THREE.Vector2
+          | undefined;
+        if (spiralCenter0 && leftCenter) {
+          spiralCenter0.copy(leftCenter);
+        }
+        if (spiralCenter1 && rightCenter) {
+          spiralCenter1.copy(rightCenter);
+        }
+      }
     }
     updateSizing();
     window.addEventListener("resize", updateSizing);
@@ -727,6 +913,24 @@ export default function DoorScene({
         tmpVec3
       );
 
+      if (spiral?.material?.uniforms) {
+        const spiralUniforms = spiral.material.uniforms;
+        const leftCenter = leftPortal.uniforms.uCenter.value as THREE.Vector2;
+        const rightCenter = rightPortal.uniforms.uCenter.value as THREE.Vector2;
+        const spiralCenter0 = spiralUniforms.uCenter0?.value as
+          | THREE.Vector2
+          | undefined;
+        const spiralCenter1 = spiralUniforms.uCenter1?.value as
+          | THREE.Vector2
+          | undefined;
+        if (spiralCenter0 && leftCenter) {
+          spiralCenter0.copy(leftCenter);
+        }
+        if (spiralCenter1 && rightCenter) {
+          spiralCenter1.copy(rightCenter);
+        }
+      }
+
       leftPortal.uniforms.uTime.value = elapsed;
       rightPortal.uniforms.uTime.value = elapsed * 1.05;
       if (spiral) spiral.update(elapsed);
@@ -735,8 +939,8 @@ export default function DoorScene({
     }
 
     const textGroup = new THREE.Group();
-    textGroup.position.z = 0;
-    scene.add(textGroup);
+    textGroup.position.set(0, 0, 0);
+    sceneRoot.add(textGroup);
     let englishMesh: THREE.Mesh | null = null;
     const loadEnglish = () =>
       new Promise<void>((resolve, reject) => {
@@ -969,9 +1173,16 @@ export default function DoorScene({
       disposeMesh(englishMesh);
       renderer.dispose();
       if (spiral) spiral.dispose();
+      scene.remove(sceneRoot);
       ScrollTrigger.getAll().forEach((st) => st.kill());
     };
-  }, [englishText, farsiText, englishFontJsonPath, farsiFontPath]);
+  }, [
+    englishText,
+    farsiText,
+    englishFontJsonPath,
+    farsiFontPath,
+    sceneOffsetY,
+  ]);
 
   function createGeometryConfigHelper(
     controls: any,
@@ -1158,7 +1369,12 @@ export default function DoorScene({
       <Leva collapsed />
       <div
         ref={mountRef}
-        style={{ width: "100%", height: "200vh", touchAction: "none" }}
+        style={{
+          width: "100%",
+          height: containerHeight,
+          touchAction: "manipulation",
+          ...containerStyle,
+        }}
       />
     </>
   );

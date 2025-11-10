@@ -12,13 +12,20 @@ import {
  *
  * Returns: { mesh, update(time), resize(), dispose() }
  */
+type SpiralBackgroundOptions = {
+  parent?: THREE.Object3D;
+};
+
 export function createSpiralBackground(
   scene: THREE.Scene,
   camera: THREE.Camera,
   renderer: THREE.WebGLRenderer,
   leftObj: THREE.Object3D,
-  rightObj: THREE.Object3D
+  rightObj: THREE.Object3D,
+  options?: SpiralBackgroundOptions
 ) {
+  const parent = options?.parent ?? scene;
+
   // uniforms
   const uniforms = {
     uTime: { value: 0 },
@@ -146,7 +153,7 @@ export function createSpiralBackground(
   );
   plane.position.set(0, 0, -planeDistance); // far behind doors
   plane.renderOrder = -999; // render first, before everything
-  scene.add(plane);
+  parent.add(plane);
 
   function updateCenters() {
     projectObjectToScreenUv(
@@ -193,7 +200,7 @@ export function createSpiralBackground(
   }
 
   function dispose() {
-    scene.remove(plane);
+    parent.remove(plane);
     plane.geometry.dispose();
     mat.dispose();
   }
