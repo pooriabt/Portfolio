@@ -2,7 +2,6 @@
 import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { TextGeometry } from "three/addons/geometries/TextGeometry.js";
-import { useControls, Leva } from "leva";
 
 import { useDoorSceneSetup } from "./useDoorSceneSetup";
 
@@ -147,6 +146,52 @@ function createTextMaterialHelper(controls: any) {
   });
 }
 
+const ENGLISH_TEXT_CONFIG = Object.freeze({
+  size: 0.2,
+  depth: 0.06,
+  curveSegments: 36,
+  bevelEnabled: true,
+  bevelThickness: 0.1,
+  bevelSize: 0.023,
+  bevelSegments: 13,
+  posX: 0,
+  posY: -0.2,
+  posZ: 0,
+  rotX: -0.0,
+  rotY: 0,
+  rotZ: 0,
+  verticalPerspective: 0.0,
+  color: "#ff5fa8",
+  opacity: 1,
+  roughness: 0.3,
+  metalness: 0,
+  emissiveEnabled: true,
+  emissiveIntensity: 0.2,
+});
+
+const FARSI_TEXT_CONFIG = Object.freeze({
+  fontSize: 0.2,
+  depth: 0.2,
+  curveSegments: 36,
+  bevelEnabled: true,
+  bevelThickness: 0.07,
+  bevelSize: 0.03,
+  bevelSegments: 13,
+  posX: 0,
+  posY: 0.1,
+  posZ: 0,
+  rotX: 0.0,
+  rotY: 0.0,
+  rotZ: 0,
+  verticalPerspective: 0.0,
+  color: "#2d9cdb",
+  opacity: 1,
+  roughness: 0.3,
+  metalness: 0,
+  emissiveEnabled: true,
+  emissiveIntensity: 0.2,
+});
+
 export default function DoorScene({
   englishText = "LOVE",
   farsiText = "توکلی",
@@ -165,112 +210,8 @@ export default function DoorScene({
   const farsiOriginalGeometryRef = useRef<THREE.BufferGeometry | null>(null);
   const farsiFontRef = useRef<any>(null);
   const rtlTextPluginRef = useRef<any>(null);
-
-  const textControls = useControls("English Text", {
-    size: { value: 0.2, min: 0.05, max: 1, step: 0.1 },
-    depth: { value: 0.06, min: 0, max: 1, step: 0.05 },
-    curveSegments: { value: 36, min: 4, max: 256, step: 4 },
-    bevelEnabled: true,
-    bevelThickness: {
-      value: 0.1,
-      min: 0,
-      max: 0.1,
-      step: 0.01,
-      render: (get) => get("English Text.bevelEnabled"),
-    },
-    bevelSize: {
-      value: 0.023,
-      min: 0,
-      max: 0.1,
-      step: 0.01,
-      render: (get) => get("English Text.bevelEnabled"),
-    },
-    bevelSegments: {
-      value: 13,
-      min: 1,
-      max: 16,
-      step: 1,
-      render: (get) => get("English Text.bevelEnabled"),
-    },
-    posX: { value: 0.0, min: -5, max: 5, step: 0.1 },
-    posY: { value: -0.2, min: -5, max: 5, step: 0.1 },
-    posZ: { value: 0.0, min: -5, max: 5, step: 0.1 },
-    rotX: { value: -0.0, min: -3.14, max: 3.14, step: 0.01 },
-    rotY: { value: 0, min: -3.14, max: 3.14, step: 0.01 },
-    rotZ: { value: 0, min: -3.14, max: 3.14, step: 0.01 },
-    verticalPerspective: {
-      value: 0.0,
-      min: -2,
-      max: 2,
-      step: 0.01,
-      label: "Vertical Perspective (Trapezoid)",
-    },
-    color: "#ff5fa8",
-    opacity: { value: 1, min: 0, max: 1, step: 0.01 },
-    roughness: { value: 0.3, min: 0, max: 1, step: 0.05 },
-    metalness: { value: 0, min: 0, max: 1, step: 0.05 },
-    emissiveEnabled: true,
-    emissiveIntensity: {
-      value: 0.2,
-      min: 0,
-      max: 2,
-      step: 0.05,
-      render: (get) => get("English Text.emissiveEnabled"),
-    },
-  });
-
-  const farsiTextControls = useControls("Farsi Text", {
-    fontSize: { value: 0.2, min: 0.05, max: 1, step: 0.05 },
-    depth: { value: 0.2, min: 0, max: 1, step: 0.05 },
-    curveSegments: { value: 36, min: 4, max: 256, step: 4 },
-    bevelEnabled: true,
-    bevelThickness: {
-      value: 0.07,
-      min: 0,
-      max: 0.1,
-      step: 0.01,
-      render: (get) => get("Farsi Text.bevelEnabled"),
-    },
-    bevelSize: {
-      value: 0.03,
-      min: 0,
-      max: 0.1,
-      step: 0.01,
-      render: (get) => get("Farsi Text.bevelEnabled"),
-    },
-    bevelSegments: {
-      value: 13,
-      min: 1,
-      max: 16,
-      step: 1,
-      render: (get) => get("Farsi Text.bevelEnabled"),
-    },
-    posX: { value: 0.0, min: -5, max: 5, step: 0.1 },
-    posY: { value: 0.1, min: -5, max: 5, step: 0.1 },
-    posZ: { value: 0.0, min: -5, max: 5, step: 0.1 },
-    rotX: { value: 0.0, min: -3.14, max: 3.14, step: 0.01 },
-    rotY: { value: 0.0, min: -3.14, max: 3.14, step: 0.01 },
-    rotZ: { value: 0, min: -3.14, max: 3.14, step: 0.01 },
-    verticalPerspective: {
-      value: 0.0,
-      min: -2,
-      max: 2,
-      step: 0.01,
-      label: "Vertical Perspective (Trapezoid)",
-    },
-    color: "#2d9cdb",
-    opacity: { value: 1, min: 0, max: 1, step: 0.01 },
-    roughness: { value: 0.3, min: 0, max: 1, step: 0.05 },
-    metalness: { value: 0, min: 0, max: 1, step: 0.05 },
-    emissiveEnabled: true,
-    emissiveIntensity: {
-      value: 0.2,
-      min: 0,
-      max: 2,
-      step: 0.05,
-      render: (get) => get("Farsi Text.emissiveEnabled"),
-    },
-  });
+  const textControls = ENGLISH_TEXT_CONFIG;
+  const farsiTextControls = FARSI_TEXT_CONFIG;
 
   useDoorSceneSetup({
     mountRef,
@@ -335,16 +276,7 @@ export default function DoorScene({
     const mesh = englishMeshRef.current;
     if (!mesh) return;
     regenerateGeometry();
-  }, [
-    (textControls as any).size,
-    (textControls as any).depth,
-    (textControls as any).curveSegments,
-    (textControls as any).bevelEnabled,
-    (textControls as any).bevelThickness,
-    (textControls as any).bevelSize,
-    (textControls as any).bevelSegments,
-    englishText,
-  ]);
+  }, [englishText]);
 
   useEffect(() => {
     const mesh = englishMeshRef.current;
@@ -363,7 +295,7 @@ export default function DoorScene({
     if (mesh.material instanceof THREE.MeshStandardMaterial) {
       updateMaterialProperties(mesh.material, controls);
     }
-  }, [textControls]);
+  }, [englishText]);
 
   const regenerateFarsiGeometry = async () => {
     const mesh = farsiMeshRef.current;
@@ -406,16 +338,7 @@ export default function DoorScene({
     const mesh = farsiMeshRef.current;
     if (!mesh) return;
     regenerateFarsiGeometry();
-  }, [
-    (farsiTextControls as any).fontSize,
-    (farsiTextControls as any).depth,
-    (farsiTextControls as any).curveSegments,
-    (farsiTextControls as any).bevelEnabled,
-    (farsiTextControls as any).bevelThickness,
-    (farsiTextControls as any).bevelSize,
-    (farsiTextControls as any).bevelSegments,
-    farsiText,
-  ]);
+  }, [farsiText]);
 
   useEffect(() => {
     const mesh = farsiMeshRef.current;
@@ -434,11 +357,10 @@ export default function DoorScene({
     if (mesh.material instanceof THREE.MeshStandardMaterial) {
       updateMaterialProperties(mesh.material, controls);
     }
-  }, [farsiTextControls]);
+  }, [farsiText]);
 
   return (
     <>
-      <Leva collapsed />
       <div
         ref={mountRef}
         style={{

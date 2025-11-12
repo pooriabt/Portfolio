@@ -10,10 +10,7 @@ import imgB from "../assets/ring.png";
 import imgC from "../assets/arch-tools.png";
 import { createSpiralBackground } from "./SpiralBackground";
 import { createPortalEllipse } from "./createPortalEllipse";
-import {
-  projectObjectToScreenUv,
-  setPortalHoleRadius,
-} from "./portalMath";
+import { projectObjectToScreenUv, setPortalHoleRadius } from "./portalMath";
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -95,6 +92,10 @@ export function useDoorSceneSetup({
     portalWidthWorld: number;
     portalHeightWorld: number;
   } | null>(null);
+  const lastViewportRef = useRef<{ width: number; height: number } | null>(
+    null
+  );
+  const textScrollTriggersRef = useRef<ScrollTrigger[]>([]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -374,8 +375,8 @@ export function useDoorSceneSetup({
 
     function updateSizing() {
       if (!mount) return;
-      const newWidth = mount.clientWidth || window.innerWidth;
-      const newHeight = mount.clientHeight || window.innerHeight;
+      const newWidth = window.innerWidth || mount.clientWidth || 1;
+      const newHeight = window.innerHeight || mount.clientHeight || 1;
       renderer.setSize(newWidth, newHeight);
       camera.aspect = newWidth / newHeight;
       camera.updateProjectionMatrix();
@@ -412,15 +413,33 @@ export function useDoorSceneSetup({
 
       const viewportWidthCss = Math.max(
         1,
-        window.innerWidth || 0,
-        mount.clientWidth || 0,
-        renderer.domElement.clientWidth || 0
+        window.innerWidth ||
+          mount.clientWidth ||
+          renderer.domElement.clientWidth ||
+          0
       );
       const viewportHeightCss = Math.max(
         1,
-        window.innerHeight || 0,
-        renderer.domElement.clientHeight || 0
+        window.innerHeight ||
+          mount.clientHeight ||
+          renderer.domElement.clientHeight ||
+          0
       );
+
+      const lastViewport = lastViewportRef.current;
+      const viewportChanged =
+        !lastViewport ||
+        lastViewport.width !== viewportWidthCss ||
+        lastViewport.height !== viewportHeightCss;
+      if (viewportChanged) {
+        squareBaselineRef.current = null;
+        textScaleBaselineRef.current = null;
+        lastViewportRef.current = {
+          width: viewportWidthCss,
+          height: viewportHeightCss,
+        };
+      }
+
       const aspectRatio = viewportWidthCss / viewportHeightCss;
       const isMobileViewport = viewportWidthCss <= 600;
       const layoutCategory = isMobileViewport
@@ -435,14 +454,8 @@ export function useDoorSceneSetup({
         layoutCategoryRef.current = layoutCategory;
       }
 
-      const screenWidth =
-        typeof window !== "undefined" && window.screen
-          ? window.screen.width || viewportWidthCss
-          : viewportWidthCss;
-      const screenHeight =
-        typeof window !== "undefined" && window.screen
-          ? window.screen.height || viewportHeightCss
-          : viewportHeightCss;
+      const screenWidth = viewportWidthCss;
+      const screenHeight = viewportHeightCss;
 
       let middleColumnExtraCss = isMobileViewport
         ? viewportWidthCss * MOBILE_GAP_RATIO
@@ -653,10 +666,12 @@ export function useDoorSceneSetup({
         const spiralUniforms = spiral.material.uniforms;
         const leftCenter = leftPortal.uniforms.uCenter.value as THREE.Vector2;
         const rightCenter = rightPortal.uniforms.uCenter.value as THREE.Vector2;
-        const spiralCenter0 = spiralUniforms.uCenter0
-          ?.value as THREE.Vector2 | undefined;
-        const spiralCenter1 = spiralUniforms.uCenter1
-          ?.value as THREE.Vector2 | undefined;
+        const spiralCenter0 = spiralUniforms.uCenter0?.value as
+          | THREE.Vector2
+          | undefined;
+        const spiralCenter1 = spiralUniforms.uCenter1?.value as
+          | THREE.Vector2
+          | undefined;
         if (spiralCenter0 && leftCenter) {
           spiralCenter0.copy(leftCenter);
         }
@@ -693,10 +708,12 @@ export function useDoorSceneSetup({
         const spiralUniforms = spiral.material.uniforms;
         const leftCenter = leftPortal.uniforms.uCenter.value as THREE.Vector2;
         const rightCenter = rightPortal.uniforms.uCenter.value as THREE.Vector2;
-        const spiralCenter0 = spiralUniforms.uCenter0
-          ?.value as THREE.Vector2 | undefined;
-        const spiralCenter1 = spiralUniforms.uCenter1
-          ?.value as THREE.Vector2 | undefined;
+        const spiralCenter0 = spiralUniforms.uCenter0?.value as
+          | THREE.Vector2
+          | undefined;
+        const spiralCenter1 = spiralUniforms.uCenter1?.value as
+          | THREE.Vector2
+          | undefined;
         if (spiralCenter0 && leftCenter) {
           spiralCenter0.copy(leftCenter);
         }
@@ -854,41 +871,42 @@ export function useDoorSceneSetup({
       });
 
     Promise.all([loadEnglish(), loadFarsi()])
-      .then(() => {
-        if (englishMesh) {
-          gsap.to(englishMesh.scale, {
-            x: 0,
-            y: 0,
-            z: 0,
-            ease: "none",
-            scrollTrigger: {
-              trigger: mount,
-              start: "top top",
-              end: "bottom top",
-              scrub: 1,
-            },
-          });
-        }
-
-        if (farsiMesh) {
-          gsap.to(farsiMesh.scale, {
-            x: 0,
-            y: 0,
-            z: 0,
-            ease: "none",
-            scrollTrigger: {
-              trigger: mount,
-              start: "top top",
-              end: "bottom top",
-              scrub: 1,
-            },
-          });
-        }
-      })
       .catch((err) => {
         console.error("Error loading texts", err);
       })
       .finally(() => {
+        textScrollTriggersRef.current.forEach((trigger) => trigger.kill());
+        textScrollTriggersRef.current = [];
+
+        const english = englishMesh ?? null;
+        const farsi = farsiMesh ?? null;
+
+        if (english) {
+          gsap.set(english.scale, { x: 1, y: 1, z: 1 });
+        }
+        if (farsi) {
+          gsap.set(farsi.scale, { x: 1, y: 1, z: 1 });
+        }
+
+        if (english || farsi) {
+          const trigger = ScrollTrigger.create({
+            trigger: mount,
+            start: "top top",
+            end: () =>
+              `+=${Math.max(mount.clientHeight, window.innerHeight || 1000)}`,
+            scrub: true,
+            pin: true,
+            pinSpacing: true,
+            onUpdate: (self) => {
+              const scale = Math.max(0, 1 - self.progress);
+              if (english) english.scale.setScalar(scale);
+              if (farsi) farsi.scale.setScalar(scale);
+            },
+          });
+          textScrollTriggersRef.current.push(trigger);
+        }
+
+        ScrollTrigger.refresh();
         updateSizing();
       });
 
@@ -921,6 +939,8 @@ export function useDoorSceneSetup({
       renderer.dispose();
       if (spiral) spiral.dispose();
       scene.remove(sceneRoot);
+      textScrollTriggersRef.current.forEach((trigger) => trigger.kill());
+      textScrollTriggersRef.current = [];
       ScrollTrigger.getAll().forEach((st) => st.kill());
     };
   }, [
@@ -939,4 +959,3 @@ export function useDoorSceneSetup({
     updatePerspectiveDistortion,
   ]);
 }
-
