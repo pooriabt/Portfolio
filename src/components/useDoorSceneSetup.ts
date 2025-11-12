@@ -883,24 +883,35 @@ export function useDoorSceneSetup({
 
         if (english) {
           gsap.set(english.scale, { x: 1, y: 1, z: 1 });
+          english.rotation.set(0, 0, 0);
         }
         if (farsi) {
           gsap.set(farsi.scale, { x: 1, y: 1, z: 1 });
+          farsi.rotation.set(0, 0, 0);
         }
 
-        if (english || farsi) {
+        if (textGroupRef.current && (english || farsi)) {
           const trigger = ScrollTrigger.create({
             trigger: mount,
             start: "top top",
             end: () =>
-              `+=${Math.max(mount.clientHeight, window.innerHeight || 1000)}`,
+              `+=${
+                Math.max(mount.clientHeight, window.innerHeight || 1000) * 4
+              }`,
             scrub: true,
             pin: true,
             pinSpacing: true,
             onUpdate: (self) => {
-              const scale = Math.max(0, 1 - self.progress);
-              if (english) english.scale.setScalar(scale);
-              if (farsi) farsi.scale.setScalar(scale);
+              const rotProgress = Math.min(self.progress * 4, 1);
+              const scaleProgress = Math.max(self.progress - 0.25, 0) / 0.75;
+
+              const rotation = (-Math.PI * rotProgress) / 4;
+              const scale = Math.max(0, 1 - scaleProgress);
+
+              if (english) english.rotation.x = rotation;
+              if (farsi) farsi.rotation.x = rotation;
+
+              textGroupRef.current?.scale.setScalar(scale);
             },
           });
           textScrollTriggersRef.current.push(trigger);

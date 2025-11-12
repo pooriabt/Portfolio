@@ -148,12 +148,12 @@ function createTextMaterialHelper(controls: any) {
 
 const ENGLISH_TEXT_CONFIG = Object.freeze({
   size: 0.2,
-  depth: 0.06,
+  depth: 0.07,
   curveSegments: 36,
   bevelEnabled: true,
-  bevelThickness: 0.1,
-  bevelSize: 0.023,
-  bevelSegments: 13,
+  bevelThickness: 0.07,
+  bevelSize: 0.025,
+  bevelSegments: 20,
   posX: 0,
   posY: -0.2,
   posZ: 0,
@@ -171,10 +171,10 @@ const ENGLISH_TEXT_CONFIG = Object.freeze({
 
 const FARSI_TEXT_CONFIG = Object.freeze({
   fontSize: 0.2,
-  depth: 0.2,
+  depth: 0.08,
   curveSegments: 36,
   bevelEnabled: true,
-  bevelThickness: 0.07,
+  bevelThickness: 0.08,
   bevelSize: 0.03,
   bevelSegments: 13,
   posX: 0,
