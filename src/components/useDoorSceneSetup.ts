@@ -902,16 +902,67 @@ export function useDoorSceneSetup({
             pin: true,
             pinSpacing: true,
             onUpdate: (self) => {
-              const rotProgress = Math.min(self.progress * 4, 1);
-              const scaleProgress = Math.max(self.progress - 0.25, 0) / 0.75;
+              // ============================================
+              // STEP 1: Scale both texts to 1.2
+              // ============================================
+              // Phase 1: Scale both texts to 1.2 (progress 0 to 0.2)
+              const scaleUpPhase = Math.min(self.progress / 0.2, 1);
+              const textScale = 1 + scaleUpPhase * 0.2; // Scale from 1 to 1.2
 
+              // ============================================
+              // STEP 2: Rotation animation
+              // ============================================
+              // Phase 2: Rotation and scale down (progress 0.2 to 1.0)
+              const phase2Progress = Math.max(0, (self.progress - 0.2) / 0.8);
+              const rotProgress = Math.min(phase2Progress * 4, 1);
               const rotation = (-Math.PI * rotProgress) / 4;
-              const scale = Math.max(0, 1 - scaleProgress);
 
-              if (english) english.rotation.x = rotation;
-              if (farsi) farsi.rotation.x = rotation;
+              // ============================================
+              // STEP 3: Final scale down
+              // ============================================
+              const scaleProgress = Math.max(phase2Progress - 0.25, 0) / 0.75;
+              const groupScale = Math.max(0, 1 - scaleProgress);
 
-              textGroupRef.current?.scale.setScalar(scale);
+              // Apply individual text scaling
+              // In phase 1: scale from 1 to 1.2
+              // In phase 2: maintain 1.2 scale while rotation happens
+              const individualTextScale = self.progress < 0.2 ? textScale : 1.2;
+
+              if (english) {
+                // STEP 1: Scale to 1.2
+                english.scale.setScalar(individualTextScale);
+                // STEP 2: Apply rotation and position changes
+                if (self.progress >= 0.2) {
+                  english.rotation.x = rotation;
+                  // Decrease posY by 0.05 and increase posZ by 0.1
+                  const originalPosY = textControls.posY;
+                  const originalPosZ = textControls.posZ;
+                  english.position.y = originalPosY + 0.05 * rotProgress;
+                  english.position.z = originalPosZ + 0.5 * rotProgress;
+                } else {
+                  // Reset to original position in phase 1
+                  english.position.set(
+                    textControls.posX,
+                    textControls.posY,
+                    textControls.posZ
+                  );
+                }
+              }
+              if (farsi) {
+                // STEP 1: Scale to 1.2
+                farsi.scale.setScalar(individualTextScale);
+                // STEP 2: Apply rotation
+                if (self.progress >= 0.2) {
+                  farsi.rotation.x = rotation;
+                }
+              }
+
+              // STEP 3: Apply final scale down to the group
+              if (self.progress >= 0.2) {
+                textGroupRef.current?.scale.setScalar(groupScale);
+              } else {
+                textGroupRef.current?.scale.setScalar(1);
+              }
             },
           });
           textScrollTriggersRef.current.push(trigger);
