@@ -92,32 +92,44 @@ export function createSpiralBackground(
     float d0 = distance(uv, uCenter0);
     float d1 = distance(uv, uCenter1);
     
-    // Create smooth blend using inverse distance weighting
-    float blendDist = 0.2; // transition distance
+    // Create smooth blend using inverse distance weighting with improved falloff
+    float blendDist = 0.25; // transition distance (slightly increased for smoother blend)
     float w0 = exp(-d0 / blendDist);
     float w1 = exp(-d1 / blendDist);
     float totalWeight = w0 + w1;
     
-    // Blend the spiral values smoothly
-    float combined = (v0 * w0 + v1 * w1) / totalWeight;
+    // Blend the spiral values smoothly, with fallback to avoid division issues
+    float combined = totalWeight > 0.001 ? (v0 * w0 + v1 * w1) / totalWeight : (v0 + v1) * 0.5;
+    
+    // Smooth out artifacts in the middle region where spirals meet
+    // This prevents the white line artifact when windows are resized
+    float midDist = abs(uv.x - 0.5);
+    float centerDist = distance(uv, vec2(0.5, 0.5));
+    float midSmooth = smoothstep(0.2, 0.4, midDist) * smoothstep(0.0, 0.3, centerDist);
+    combined = mix(combined, (v0 + v1) * 0.5, (1.0 - midSmooth) * 0.4);
     
     // Convert to bands
     float band = smoothstep(0.0, 0.2, combined);
     
     // Elliptical holes (independent x/y scaling) - both portals use same size/shape
-    vec2 hp0 = uv - uCenter0;
-    hp0.x /= uHoleRadiusOuter.x;
-    hp0.y /= uHoleRadiusOuter.y;
-    float outer0 = length(hp0);
+    // When hole radius is 0, make everything fully visible
+    float holeRadiusMax = max(uHoleRadiusOuter.x, uHoleRadiusOuter.y);
+    float alpha = 1.0;
     
-    vec2 hp1 = uv - uCenter1;
-    hp1.x /= uHoleRadiusOuter.x;
-    hp1.y /= uHoleRadiusOuter.y;
-    float outer1 = length(hp1);
+    if (holeRadiusMax > 0.001) {
+      vec2 hp0 = uv - uCenter0;
+      hp0.x /= max(uHoleRadiusOuter.x, 0.001);
+      hp0.y /= max(uHoleRadiusOuter.y, 0.001);
+      float outer0 = length(hp0);
+      
+      vec2 hp1 = uv - uCenter1;
+      hp1.x /= max(uHoleRadiusOuter.x, 0.001);
+      hp1.y /= max(uHoleRadiusOuter.y, 0.001);
+      float outer1 = length(hp1);
 
-    float outerDist = min(outer0, outer1);
-
-    float alpha = smoothstep(1.0, 1.35, outerDist);
+      float outerDist = min(outer0, outer1);
+      alpha = smoothstep(1.0, 1.35, outerDist);
+    }
 
     // final color
     vec3 color = mix(vec3(0.0), vec3(1.0), band);

@@ -191,6 +191,8 @@ export function useDoorSceneSetup({
       leftPortalGroup.add(leftPortal.brushMesh);
     }
     leftPortalGroup.scale.setScalar(portalGroupScale);
+    // Set initial scale to 0 - will scale to 1 at beginning of step 3
+    leftPortalGroup.scale.multiplyScalar(0);
 
     const rightPortalGroup = new THREE.Group();
     rightPortalGroup.name = "RightPortal_Group";
@@ -199,10 +201,16 @@ export function useDoorSceneSetup({
       rightPortalGroup.add(rightPortal.brushMesh);
     }
     rightPortalGroup.scale.setScalar(portalGroupScale);
+    // Set initial scale to 0 - will scale to 1 at beginning of step 3
+    rightPortalGroup.scale.multiplyScalar(0);
 
     sceneRoot.add(leftPortalGroup, rightPortalGroup);
 
     let spiral: ReturnType<typeof createSpiralBackground> | null = null;
+    const spiralHoleRadiusRef = {
+      inner: null as THREE.Vector2 | null,
+      outer: null as THREE.Vector2 | null,
+    };
     try {
       spiral = createSpiralBackground(
         scene,
@@ -212,6 +220,8 @@ export function useDoorSceneSetup({
         rightPortalGroup,
         { parent: sceneRoot }
       );
+      // Store original hole radius values for animation (will be set after first resize)
+      // Initial hole radius will be set to 0 after first resize
     } catch (err) {
       console.error("Failed to create spiral background:", err);
     }
@@ -635,16 +645,23 @@ export function useDoorSceneSetup({
 
       if (spiral) {
         spiral.resize();
+        // Ensure spiral mesh is always at scale 1 (always visible)
+        if (spiral.mesh) {
+          spiral.mesh.scale.setScalar(1);
+        }
         if (spiral.material?.uniforms) {
           const spiralHole = spiral.material.uniforms.uHoleRadius
             ?.value as THREE.Vector2;
           const spiralOuter = spiral.material.uniforms.uHoleRadiusOuter
             ?.value as THREE.Vector2;
-          if (spiralHole) {
-            spiralHole.copy(tmpInnerHole);
-          }
-          if (spiralOuter) {
-            spiralOuter.copy(tmpRingHole);
+          if (spiralHole && spiralOuter) {
+            // Store/update original values for animation
+            spiralHoleRadiusRef.inner = tmpInnerHole.clone();
+            spiralHoleRadiusRef.outer = tmpRingHole.clone();
+            // Always maintain hole radius at 0 initially - animation will control it during scroll
+            // This ensures spiral background is always visible (holes at 0 = fully visible)
+            spiralHole.set(0, 0);
+            spiralOuter.set(0, 0);
           }
         }
       }
@@ -901,46 +918,153 @@ export function useDoorSceneSetup({
             scrub: true,
             pin: true,
             pinSpacing: true,
+            onEnter: () => {
+              // Ensure initial state when entering the trigger
+              if (english) {
+                english.scale.setScalar(1);
+                english.rotation.set(0, 0, 0);
+                english.position.set(
+                  textControls.posX,
+                  textControls.posY,
+                  textControls.posZ
+                );
+              }
+              if (farsi) {
+                farsi.scale.setScalar(1);
+                farsi.rotation.set(0, 0, 0);
+              }
+              if (textGroupRef.current) {
+                textGroupRef.current.scale.setScalar(1);
+              }
+              // Reset portals to scale 0 and spiral holes to 0 at initial state
+              leftPortalGroup.scale.setScalar(0);
+              rightPortalGroup.scale.setScalar(0);
+              if (spiral?.material?.uniforms) {
+                const spiralHole = spiral.material.uniforms.uHoleRadius
+                  ?.value as THREE.Vector2;
+                const spiralOuter = spiral.material.uniforms.uHoleRadiusOuter
+                  ?.value as THREE.Vector2;
+                if (spiralHole && spiralOuter) {
+                  spiralHole.set(0, 0);
+                  spiralOuter.set(0, 0);
+                }
+              }
+            },
+            onLeaveBack: () => {
+              // Reset to initial state when scrolling back above the trigger
+              if (english) {
+                english.scale.setScalar(1);
+                english.rotation.set(0, 0, 0);
+                english.position.set(
+                  textControls.posX,
+                  textControls.posY,
+                  textControls.posZ
+                );
+              }
+              if (farsi) {
+                farsi.scale.setScalar(1);
+                farsi.rotation.set(0, 0, 0);
+              }
+              if (textGroupRef.current) {
+                textGroupRef.current.scale.setScalar(1);
+              }
+              // Reset portals to scale 0 and spiral holes to 0 at initial state
+              leftPortalGroup.scale.setScalar(0);
+              rightPortalGroup.scale.setScalar(0);
+              if (spiral?.material?.uniforms) {
+                const spiralHole = spiral.material.uniforms.uHoleRadius
+                  ?.value as THREE.Vector2;
+                const spiralOuter = spiral.material.uniforms.uHoleRadiusOuter
+                  ?.value as THREE.Vector2;
+                if (spiralHole && spiralOuter) {
+                  spiralHole.set(0, 0);
+                  spiralOuter.set(0, 0);
+                }
+              }
+            },
             onUpdate: (self) => {
+              const progress = Math.max(0, Math.min(1, self.progress)); // Clamp progress between 0 and 1
+
+              // Force complete reset when at the very beginning
+              if (progress === 0 || progress < 0.001) {
+                if (english) {
+                  english.scale.setScalar(1);
+                  english.rotation.set(0, 0, 0);
+                  english.position.set(
+                    textControls.posX,
+                    textControls.posY,
+                    textControls.posZ
+                  );
+                }
+                if (farsi) {
+                  farsi.scale.setScalar(1);
+                  farsi.rotation.set(0, 0, 0);
+                }
+                if (textGroupRef.current) {
+                  textGroupRef.current.scale.setScalar(1);
+                }
+                // Reset portals to scale 0 and spiral holes to 0 at initial state
+                leftPortalGroup.scale.setScalar(0);
+                rightPortalGroup.scale.setScalar(0);
+                // Reset spiral hole radius to 0 (spiral mesh should always be visible at scale 1)
+                if (spiral?.material?.uniforms) {
+                  const spiralHole = spiral.material.uniforms.uHoleRadius
+                    ?.value as THREE.Vector2;
+                  const spiralOuter = spiral.material.uniforms.uHoleRadiusOuter
+                    ?.value as THREE.Vector2;
+                  if (spiralHole && spiralOuter) {
+                    spiralHole.set(0, 0);
+                    spiralOuter.set(0, 0);
+                  }
+                }
+                return; // Early return to avoid unnecessary calculations
+              }
+
               // ============================================
               // STEP 1: Scale both texts to 1.2
               // ============================================
               // Phase 1: Scale both texts to 1.2 (progress 0 to 0.2)
-              const scaleUpPhase = Math.min(self.progress / 0.2, 1);
+              const scaleUpPhase =
+                progress < 0.2 ? Math.min(progress / 0.2, 1) : 1;
               const textScale = 1 + scaleUpPhase * 0.2; // Scale from 1 to 1.2
 
               // ============================================
               // STEP 2: Rotation animation
               // ============================================
               // Phase 2: Rotation and scale down (progress 0.2 to 1.0)
-              const phase2Progress = Math.max(0, (self.progress - 0.2) / 0.8);
+              const phase2Progress =
+                progress >= 0.2 ? Math.max(0, (progress - 0.2) / 0.8) : 0;
               const rotProgress = Math.min(phase2Progress * 4, 1);
-              const rotation = (-Math.PI * rotProgress) / 4;
+              const rotation =
+                progress >= 0.2 ? (-Math.PI * rotProgress) / 4 : 0;
 
               // ============================================
               // STEP 3: Final scale down
               // ============================================
-              const scaleProgress = Math.max(phase2Progress - 0.25, 0) / 0.75;
+              const scaleProgress =
+                progress >= 0.2 ? Math.max(phase2Progress - 0.25, 0) / 0.75 : 0;
               const groupScale = Math.max(0, 1 - scaleProgress);
 
               // Apply individual text scaling
               // In phase 1: scale from 1 to 1.2
               // In phase 2: maintain 1.2 scale while rotation happens
-              const individualTextScale = self.progress < 0.2 ? textScale : 1.2;
+              const individualTextScale = progress < 0.2 ? textScale : 1.2;
 
               if (english) {
                 // STEP 1: Scale to 1.2
                 english.scale.setScalar(individualTextScale);
+
                 // STEP 2: Apply rotation and position changes
-                if (self.progress >= 0.2) {
+                if (progress >= 0.2) {
                   english.rotation.x = rotation;
-                  // Decrease posY by 0.05 and increase posZ by 0.1
+                  // Position changes during rotation
                   const originalPosY = textControls.posY;
                   const originalPosZ = textControls.posZ;
                   english.position.y = originalPosY + 0.05 * rotProgress;
                   english.position.z = originalPosZ + 0.5 * rotProgress;
                 } else {
-                  // Reset to original position in phase 1
+                  // Explicitly reset to initial state in phase 1
+                  english.rotation.x = 0;
                   english.position.set(
                     textControls.posX,
                     textControls.posY,
@@ -948,20 +1072,76 @@ export function useDoorSceneSetup({
                   );
                 }
               }
+
               if (farsi) {
                 // STEP 1: Scale to 1.2
                 farsi.scale.setScalar(individualTextScale);
+
                 // STEP 2: Apply rotation
-                if (self.progress >= 0.2) {
+                if (progress >= 0.2) {
                   farsi.rotation.x = rotation;
+                } else {
+                  // Explicitly reset to initial state in phase 1
+                  farsi.rotation.x = 0;
                 }
               }
 
               // STEP 3: Apply final scale down to the group
-              if (self.progress >= 0.2) {
+              if (progress >= 0.2) {
                 textGroupRef.current?.scale.setScalar(groupScale);
               } else {
                 textGroupRef.current?.scale.setScalar(1);
+              }
+
+              // Scale portals and spiral fade holes at beginning of step 3 (when text scale down starts)
+              // Step 3 starts when scaleProgress > 0, which is when phase2Progress > 0.25
+              // This means progress > 0.2 + 0.25 * 0.8 = 0.4
+              if (scaleProgress > 0) {
+                // Scale portals from 0 to their target scale
+                const portalAndHoleScaleProgress = Math.min(
+                  scaleProgress * 1.5,
+                  1
+                ); // Scale faster to reach 1 before text fully scales down
+                const portalScale =
+                  portalGroupScale * portalAndHoleScaleProgress;
+                leftPortalGroup.scale.setScalar(portalScale);
+                rightPortalGroup.scale.setScalar(portalScale);
+
+                // Animate spiral fade holes from 0 to original radius
+                if (
+                  spiral?.material?.uniforms &&
+                  spiralHoleRadiusRef.inner &&
+                  spiralHoleRadiusRef.outer
+                ) {
+                  const spiralHole = spiral.material.uniforms.uHoleRadius
+                    ?.value as THREE.Vector2;
+                  const spiralOuter = spiral.material.uniforms.uHoleRadiusOuter
+                    ?.value as THREE.Vector2;
+                  if (spiralHole && spiralOuter) {
+                    spiralHole.set(
+                      spiralHoleRadiusRef.inner.x * portalAndHoleScaleProgress,
+                      spiralHoleRadiusRef.inner.y * portalAndHoleScaleProgress
+                    );
+                    spiralOuter.set(
+                      spiralHoleRadiusRef.outer.x * portalAndHoleScaleProgress,
+                      spiralHoleRadiusRef.outer.y * portalAndHoleScaleProgress
+                    );
+                  }
+                }
+              } else {
+                // Keep portals at scale 0 and spiral holes at 0 before step 3
+                leftPortalGroup.scale.setScalar(0);
+                rightPortalGroup.scale.setScalar(0);
+                if (spiral?.material?.uniforms) {
+                  const spiralHole = spiral.material.uniforms.uHoleRadius
+                    ?.value as THREE.Vector2;
+                  const spiralOuter = spiral.material.uniforms.uHoleRadiusOuter
+                    ?.value as THREE.Vector2;
+                  if (spiralHole && spiralOuter) {
+                    spiralHole.set(0, 0);
+                    spiralOuter.set(0, 0);
+                  }
+                }
               }
             },
           });
