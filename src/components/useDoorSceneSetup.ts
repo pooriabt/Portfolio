@@ -11,6 +11,7 @@ import imgC from "../assets/arch-tools.png";
 import { createSpiralBackground } from "./SpiralBackground";
 import { createPortalEllipse } from "./createPortalEllipse";
 import { projectObjectToScreenUv, setPortalHoleRadius } from "./portalMath";
+import { createWavyText } from "./createWavyText";
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -231,6 +232,71 @@ export function useDoorSceneSetup({
       console.error("Failed to create spiral background:", err);
     }
 
+    // Create wavy text elements for navigation (home, about, contacts, resume)
+    const wavyTexts: THREE.Mesh[] = [];
+    const textLabels = ["home", "about", "contacts", "resume"];
+    // Base values for full-screen (will be used in updateSizing)
+    const baseTextSize = 0.5; // Full-screen text size
+    const baseTextPositions = [
+      { x: -6, y: 3, z: -8 }, // Full-screen positions
+      { x: -2, y: 3, z: -8 },
+      { x: 2, y: 3, z: -8 },
+      { x: 6, y: 3, z: -8 },
+    ];
+
+    // Load font for wavy text (using same font as English text)
+    const loadWavyTexts = () =>
+      new Promise<void>((resolve) => {
+        const loader = new FontLoader();
+        loader.load(
+          englishFontJsonPath,
+          (font) => {
+            if (spiral?.material?.uniforms) {
+              const spiralUniforms = spiral.material.uniforms;
+              textLabels.forEach((label, index) => {
+                const textMesh = createWavyText({
+                  text: label,
+                  font: font,
+                  position: baseTextPositions[index], // Use base positions initially
+                  size: baseTextSize, // Use base size initially
+                  color: "#ffffff",
+                  onClick: () => {
+                    console.log(`Clicked: ${label}`);
+                    // Add your navigation logic here
+                  },
+                  spiralUniforms: {
+                    uTime: spiralUniforms.uTime as { value: number },
+                    uResolution: spiralUniforms.uResolution as {
+                      value: THREE.Vector2;
+                    },
+                    uCenter0: spiralUniforms.uCenter0 as {
+                      value: THREE.Vector2;
+                    },
+                    uCenter1: spiralUniforms.uCenter1 as {
+                      value: THREE.Vector2;
+                    },
+                    uSpeed: spiralUniforms.uSpeed as { value: number },
+                    uBands: spiralUniforms.uBands as { value: number },
+                  },
+                });
+                // Set initial scale to 0 to prevent large initial size
+                textMesh.scale.setScalar(0);
+                sceneRoot.add(textMesh);
+                wavyTexts.push(textMesh);
+              });
+              // Update positions and sizes after creation
+              // updateSizing will be called after all fonts are loaded
+            }
+            resolve();
+          },
+          undefined,
+          () => {
+            console.warn("Failed to load font for wavy text");
+            resolve();
+          }
+        );
+      });
+
     let leftOpen = true;
     let rightOpen = true;
     let animLeft = false;
@@ -358,6 +424,17 @@ export function useDoorSceneSetup({
       pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
       const raycaster = new THREE.Raycaster();
       raycaster.setFromCamera(pointer, camera);
+
+      // Check wavy text clicks first
+      const textIntersects = raycaster.intersectObjects(wavyTexts, true);
+      if (textIntersects.length > 0) {
+        const clickedMesh = textIntersects[0].object as THREE.Mesh;
+        if (clickedMesh.userData.isClickable && clickedMesh.userData.onClick) {
+          clickedMesh.userData.onClick();
+          return;
+        }
+      }
+
       const intersects = raycaster.intersectObjects(
         [leftPortal.mesh, rightPortal.mesh],
         false
@@ -671,6 +748,74 @@ export function useDoorSceneSetup({
         }
       }
 
+      // Update wavy text positions and sizes responsively
+      // Use full-screen (16-inch laptop) positions and sizes as baseline
+      if (wavyTexts.length > 0) {
+        // Base values for full-screen (16-inch laptop: 1920x1080)
+        // Use the same baseTextSize and baseTextPositions defined above
+        const baseViewportWidth = 1920;
+        const baseViewportHeight = 1080;
+
+        // Determine text size based on screen width (3 breakpoints)
+        let targetTextSize: number;
+        if (viewportWidthCss >= 900) {
+          targetTextSize = 0.43;
+        } else if (viewportWidthCss > 600 && viewportWidthCss < 900) {
+          targetTextSize = 0.35;
+        } else {
+          targetTextSize = 0.27;
+        }
+
+        // Calculate scale factor to achieve target size from base size
+        // baseTextSize is the geometry size, targetTextSize is what we want to display
+        // Use ONLY the breakpoint-based size, don't apply viewportScale to size
+        const sizeScale = targetTextSize / baseTextSize;
+
+        // Calculate position scale factor based on viewport size
+        // Scale down proportionally for smaller windows (only for positions, not size)
+        const viewportScale = Math.min(
+          viewportWidthCss / baseViewportWidth,
+          viewportHeightCss / baseViewportHeight
+        );
+
+        // Calculate frustum dimensions for position scaling
+        // Use the same distance calculation as portals
+        const textZ = -8;
+        const distance = Math.abs(camera.position.z - textZ);
+        const vFov = (camera.fov * Math.PI) / 180;
+        const frustumHeightAtText = 2 * distance * Math.tan(vFov / 2);
+        const frustumWidthAtText = frustumHeightAtText * camera.aspect;
+
+        // Base frustum dimensions for full-screen (1920x1080)
+        const baseDistance = Math.abs(camera.position.z - textZ);
+        const baseFrustumHeight = 2 * baseDistance * Math.tan(vFov / 2);
+        const baseAspectRatio = baseViewportWidth / baseViewportHeight;
+        const baseFrustumWidth = baseFrustumHeight * baseAspectRatio;
+
+        // Scale factors for positions (how much to scale from base positions)
+        const positionScaleX = frustumWidthAtText / baseFrustumWidth;
+        const positionScaleY = frustumHeightAtText / baseFrustumHeight;
+
+        // Update each text mesh
+        wavyTexts.forEach((textMesh, index) => {
+          // Scale positions from base full-screen positions
+          const basePos = baseTextPositions[index];
+          textMesh.position.set(
+            basePos.x * positionScaleX,
+            basePos.y * positionScaleY,
+            basePos.z
+          );
+
+          // Scale text size based on screen width breakpoints ONLY
+          // The geometry was created with baseTextSize, so we scale the mesh
+          // Use ONLY sizeScale (from breakpoints), NOT viewportScale (which is only for positions)
+          textMesh.scale.setScalar(sizeScale);
+
+          // Debug: log to verify values are being applied
+          // console.log(`Text ${index}: pos(${textMesh.position.x.toFixed(2)}, ${textMesh.position.y.toFixed(2)}), scale(${viewportScale.toFixed(3)})`);
+        });
+      }
+
       projectObjectToScreenUv(
         leftPortalGroup,
         camera,
@@ -747,6 +892,33 @@ export function useDoorSceneSetup({
       leftPortal.uniforms.uTime.value = elapsed;
       rightPortal.uniforms.uTime.value = elapsed * 1.05;
       if (spiral) spiral.update(elapsed);
+
+      // Update wavy text uniforms to sync with spiral
+      wavyTexts.forEach((textMesh) => {
+        if (textMesh.material instanceof THREE.ShaderMaterial) {
+          const uniforms = textMesh.material.uniforms;
+          if (uniforms.uTime) uniforms.uTime.value = elapsed;
+          if (spiral?.material?.uniforms) {
+            const spiralUniforms = spiral.material.uniforms;
+            if (uniforms.uCenter0 && spiralUniforms.uCenter0) {
+              (uniforms.uCenter0.value as THREE.Vector2).copy(
+                spiralUniforms.uCenter0.value as THREE.Vector2
+              );
+            }
+            if (uniforms.uCenter1 && spiralUniforms.uCenter1) {
+              (uniforms.uCenter1.value as THREE.Vector2).copy(
+                spiralUniforms.uCenter1.value as THREE.Vector2
+              );
+            }
+            if (uniforms.uResolution && spiralUniforms.uResolution) {
+              (uniforms.uResolution.value as THREE.Vector2).copy(
+                spiralUniforms.uResolution.value as THREE.Vector2
+              );
+            }
+          }
+        }
+      });
+
       rafId = requestAnimationFrame(animate);
       renderer.render(scene, camera);
     }
@@ -892,11 +1064,15 @@ export function useDoorSceneSetup({
         );
       });
 
-    Promise.all([loadEnglish(), loadFarsi()])
+    Promise.all([loadEnglish(), loadFarsi(), loadWavyTexts()])
       .catch((err) => {
         console.error("Error loading texts", err);
       })
       .finally(() => {
+        // Update wavy text positions and sizes after all fonts are loaded
+        if (wavyTexts.length > 0) {
+          updateSizing();
+        }
         textScrollTriggersRef.current.forEach((trigger) => trigger.kill());
         textScrollTriggersRef.current = [];
 
