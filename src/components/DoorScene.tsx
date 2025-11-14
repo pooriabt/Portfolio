@@ -147,7 +147,7 @@ function createTextMaterialHelper(controls: any) {
 }
 
 const ENGLISH_TEXT_CONFIG = Object.freeze({
-  size: 0.2,
+  size: 0.25,
   depth: 0.07,
   curveSegments: 36,
   bevelEnabled: true,
@@ -170,7 +170,7 @@ const ENGLISH_TEXT_CONFIG = Object.freeze({
 });
 
 const FARSI_TEXT_CONFIG = Object.freeze({
-  fontSize: 0.2,
+  fontSize: 0.25,
   depth: 0.08,
   curveSegments: 36,
   bevelEnabled: true,

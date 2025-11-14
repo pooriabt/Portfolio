@@ -35,6 +35,8 @@ export function createPortalEllipse(params: {
     uBrushWidth: { value: params.brushWidth ?? 5.0 },
     uRenderBrushOnly: { value: 0.0 },
     uBrushOuterScale: { value: params.brushOuterScale ?? 1.2 },
+    uBrushPulse: { value: 0.0 }, // Pulsing effect for living organ look (0-1)
+    uBrushPulseSpeed: { value: 1.2 }, // Speed of pulse animation
   };
 
   const vertex = glsl`
@@ -66,6 +68,8 @@ export function createPortalEllipse(params: {
     uniform float uBrushWidth;
     uniform float uRenderBrushOnly;
     uniform float uBrushOuterScale;
+    uniform float uBrushPulse;
+    uniform float uBrushPulseSpeed;
     ${
       params.useDigitalRain
         ? glsl`
@@ -110,7 +114,11 @@ export function createPortalEllipse(params: {
       vec3 baseColor = vec3(0.05);
       float baseAlpha = 1.0;
 
-      if (uRenderBrushOnly < 0.5) {
+      // When rendering brush only, set base to black so brush color shows through
+      if (uRenderBrushOnly > 0.5) {
+        baseColor = vec3(0.0);
+        baseAlpha = 0.0;
+      } else if (uRenderBrushOnly < 0.5) {
         ${
           params.useDigitalRain
             ? `
@@ -179,13 +187,24 @@ export function createPortalEllipse(params: {
       
       if (brushEnabled > 0.5) {
         brushAngle = uTime * uBrushRotation;
+        
+        // Calculate pulsing effect - living organ pulse (decreases width)
+        float pulsePhase = uTime * uBrushPulseSpeed;
+        float pulse = 0.5 + 0.5 * sin(pulsePhase); // Pulse from 0 to 1
+        float pulseStrength = uBrushPulse; // Control overall pulse strength
+        
+        // Apply pulsing to brush width - DECREASE width during pulse (not increase)
+        float pulsedBrushWidth = uBrushWidth * (1.0 - pulse * pulseStrength * 0.4);
+        
         brushIntensity = getBrushEffect(
           screenUv,
           uCenter,
           meshBoundaryRadius,
           brushAngle,
           uHue * 10.0,
-          uBrushWidth
+          pulsedBrushWidth,
+          pulse,
+          pulseStrength
         );
         brushZoneFactor = step(0.01, brushIntensity);
       } else {
@@ -212,24 +231,58 @@ export function createPortalEllipse(params: {
       // Normalize angle to 0-1 range for gradient (0 = start, 1 = end)
       float gradientPos = rotatedAngle / 6.28318;
       
-      // Create smooth gradient from dark (start) to lighter gray (end)
-      float darkGray = 0.2;   // Dark gray at start
-      float lightGray = 0.35; // Lighter gray at end (current color)
+      // Create smooth, continuous gradient of magenta fluorescent colors
+      // Gradient wraps smoothly around: dark magenta -> bright magenta -> dark magenta
+      vec3 brightMagenta = vec3(1.0, 0.0, 1.0);      // Bright fluorescent magenta (RGB: 255, 0, 255)
+      vec3 darkMagenta = vec3(0.4, 0.0, 0.8);        // Darker magenta/purple (more purple for contrast)
       
-      // Smooth transition - use smoothstep for gradual color shift from start to end
-      // This creates a natural gradient that fades from dark to light
-      float gradientFactor = smoothstep(0.0, 1.0, gradientPos);
-      float grayValue = mix(darkGray, lightGray, gradientFactor);
+      // Create smooth, continuous gradient that wraps around seamlessly
+      // Use smooth blending with overlapping transitions for organic, pulsing effect
+      // This creates a living organ effect with smooth color transitions
       
-      // Brush color - gradient from dark to light gray
-      vec3 brushColor = vec3(grayValue, grayValue, grayValue);
+      // Use two overlapping color zones that blend smoothly across the entire circle:
+      // Zone 1: dark magenta (centered at 0.0, wraps around)
+      // Zone 2: bright magenta (centered at 0.5, opposite side)
       
-      // Mix brush with existing color - darker appearance
-      if (brushEnabled > 0.5) {
-        float brushMix = brushIntensity * 0.75; // Slightly higher opacity to maintain visibility with darker color
-        outCol = mix(outCol, brushColor, brushMix);
-      // Ensure brush shows even if base alpha is low (for gap coverage) - reduced opacity
-        outAlpha = max(outAlpha, brushIntensity * uAlpha * 0.7);
+      // Calculate weights for each color using smooth, overlapping curves
+      // This ensures seamless wrapping and smooth transitions across the entire brush
+      
+      // Dark magenta zone (wraps around seamlessly at 0.0/1.0)
+      float dist1 = min(gradientPos, 1.0 - gradientPos);
+      float weight1 = smoothstep(0.5, 0.0, dist1); // Wider falloff to cover half the circle
+      
+      // Bright magenta zone (centered at 0.5, opposite side)
+      float dist2 = abs(gradientPos - 0.5);
+      // Handle wrap-around for bright magenta (if near edges)
+      if (dist2 > 0.5) dist2 = 1.0 - dist2;
+      float weight2 = smoothstep(0.5, 0.0, dist2); // Wider falloff to cover half the circle
+      
+      // Normalize weights for smooth blending across entire circle
+      float totalWeight = weight1 + weight2;
+      if (totalWeight > 0.001) {
+        weight1 /= totalWeight;
+        weight2 /= totalWeight;
+      } else {
+        // Fallback to ensure all areas have color
+        weight1 = 0.5;
+        weight2 = 0.5;
+      }
+      
+      // Blend colors smoothly - ensures entire brush has continuous gradient
+      vec3 brushColor = darkMagenta * weight1 + brightMagenta * weight2;
+      
+      // Boost saturation and brightness for fluorescent effect
+      float saturationBoost = 0.1; // Increase saturation
+      float brightnessBoost = 0.2; // Slight brightness increase
+      brushColor.rgb = brushColor.rgb * brightnessBoost;
+      
+      // Apply brush color - replace base color with magenta fluorescent gradient
+      if (brushEnabled > 0.5 && brushIntensity > 0.0) {
+        // Directly use brush color - full magenta fluorescent gradient
+        // Don't mix or dim - use full color saturation
+        outCol = brushColor;
+      // Ensure brush shows with full alpha for maximum visibility - increased opacity
+        outAlpha = max(outAlpha, brushIntensity * uAlpha * 2.5); // Increased opacity multiplier
       }
 
       // Allow brush to render outside mesh boundary by not making border transparent
@@ -307,6 +360,8 @@ export function createPortalEllipse(params: {
     "uBrushRotation",
     "uBrushWidth",
     "uBrushOuterScale",
+    "uBrushPulse",
+    "uBrushPulseSpeed",
   ] as const;
   sharedUniformKeys.forEach((key) => {
     brushUniforms[key] = uniforms[key];

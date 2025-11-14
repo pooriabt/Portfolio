@@ -160,6 +160,11 @@ export function useDoorSceneSetup({
 
     leftPortal.uniforms.uBrushRotation.value = 0.7;
     rightPortal.uniforms.uBrushRotation.value = -0.8;
+    // Enable living organ pulsing effect
+    leftPortal.uniforms.uBrushPulse.value = 1.0; // Full pulse strength
+    rightPortal.uniforms.uBrushPulse.value = 1.0; // Full pulse strength
+    leftPortal.uniforms.uBrushPulseSpeed.value = 1.2; // Pulse speed
+    rightPortal.uniforms.uBrushPulseSpeed.value = 1.2; // Pulse speed
 
     if (leftPortal.brushMesh) {
       leftPortal.brushMesh.scale.setScalar(1.0);
@@ -1096,12 +1101,11 @@ export function useDoorSceneSetup({
               // Scale portals and spiral fade holes at beginning of step 3 (when text scale down starts)
               // Step 3 starts when scaleProgress > 0, which is when phase2Progress > 0.25
               // This means progress > 0.2 + 0.25 * 0.8 = 0.4
+              // Synchronize portal scaling with text scale down - portals reach scale 1 when text reaches scale 0
               if (scaleProgress > 0) {
-                // Scale portals from 0 to their target scale
-                const portalAndHoleScaleProgress = Math.min(
-                  scaleProgress * 1.5,
-                  1
-                ); // Scale faster to reach 1 before text fully scales down
+                // Scale portals from 0 to their target scale - synchronized with text scale down
+                // Use scaleProgress directly so portals reach 1 when text reaches 0 (when scaleProgress = 1)
+                const portalAndHoleScaleProgress = scaleProgress; // Same timeline as text scale down
                 const portalScale =
                   portalGroupScale * portalAndHoleScaleProgress;
                 leftPortalGroup.scale.setScalar(portalScale);

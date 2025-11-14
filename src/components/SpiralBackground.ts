@@ -117,17 +117,17 @@ export function createSpiralBackground(
     float alpha = 1.0;
     
     if (holeRadiusMax > 0.001) {
-      vec2 hp0 = uv - uCenter0;
+    vec2 hp0 = uv - uCenter0;
       hp0.x /= max(uHoleRadiusOuter.x, 0.001);
       hp0.y /= max(uHoleRadiusOuter.y, 0.001);
-      float outer0 = length(hp0);
-      
-      vec2 hp1 = uv - uCenter1;
+    float outer0 = length(hp0);
+    
+    vec2 hp1 = uv - uCenter1;
       hp1.x /= max(uHoleRadiusOuter.x, 0.001);
       hp1.y /= max(uHoleRadiusOuter.y, 0.001);
-      float outer1 = length(hp1);
+    float outer1 = length(hp1);
 
-      float outerDist = min(outer0, outer1);
+    float outerDist = min(outer0, outer1);
       alpha = smoothstep(1.0, 1.35, outerDist);
     }
 

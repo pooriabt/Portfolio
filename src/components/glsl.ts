@@ -191,7 +191,9 @@ float getBrushEffect(
   vec2 holeRadius,
   float angle,
   float seed,
-  float widthScale
+  float widthScale,
+  float pulse,
+  float pulseStrength
 ) {
   // Innermost thin stroke slightly inside the portal
   float lineInnerWidth = 0.0052;
@@ -241,12 +243,65 @@ float getBrushEffect(
   // Combine strokes - prioritize maximum intensity so outer strokes dominate where present
   float totalBrush = max(lineInner, max(lineOuter, lineFeather));
 
-  // Compute angle around ellipse for gap modulation
+  // Compute angle around ellipse for gap modulation and pulsing
   float currentAngle = atan((screenUv.y - center.y) / holeRadius.y, (screenUv.x - center.x) / holeRadius.x);
   float rotatedAngle = currentAngle - angle;
   rotatedAngle = rotatedAngle + 3.14159;
   rotatedAngle = rotatedAngle - floor(rotatedAngle / 6.28318) * 6.28318;
   float angleCoord = rotatedAngle * 0.159;
+
+  // Living organ pulsing effect - gradient pulse traveling along brush path with smooth gaps
+  float pulseMask = 1.0;
+  if (pulseStrength > 0.001) {
+    // Create gradient pulse that travels along the brush path
+    // Pulse travels around the circle as a wave
+    float pulseWave = pulse * 6.28318; // Convert pulse (0-1) to angle (0-2π)
+    
+    // Create 1-2 gap points that travel with the pulse
+    // Use seed to create consistent but varied gap positions
+    float gapOffset1 = seed * 0.618; // First gap offset
+    float gapOffset2 = seed * 0.382 + 3.14159; // Second gap offset (opposite side)
+    
+    // Gap positions travel with the pulse wave
+    float gapPos1 = pulseWave + gapOffset1;
+    float gapPos2 = pulseWave + gapOffset2;
+    
+    // Normalize gap positions to 0-2π range
+    gapPos1 = gapPos1 - floor(gapPos1 / 6.28318) * 6.28318;
+    gapPos2 = gapPos2 - floor(gapPos2 / 6.28318) * 6.28318;
+    
+    // Calculate distance from gap positions (wrapped around circle)
+    float distToGap1 = abs(rotatedAngle - gapPos1);
+    distToGap1 = min(distToGap1, 6.28318 - distToGap1);
+    float distToGap2 = abs(rotatedAngle - gapPos2);
+    distToGap2 = min(distToGap2, 6.28318 - distToGap2);
+    
+    // Create smooth gaps (cuts) - smooth transitions, not hard steps
+    float gapWidth = 0.1; // Gap width
+    float gapEdge = 0.02; // Smooth edge width for transitions
+    float gap1 = smoothstep(gapWidth + gapEdge, gapWidth, distToGap1); // Smooth cut
+    float gap2 = smoothstep(gapWidth + gapEdge, gapWidth, distToGap2); // Smooth cut
+    float combinedGap = min(gap1, gap2); // Both gaps must be clear
+    
+    // Create gradient pulse effect that travels along the brush path
+    // Pulse is a wave that moves around the circle, creating a gradient effect
+    float pulsePhase = rotatedAngle - pulseWave;
+    float pulseGradient = sin(pulsePhase) * 0.5 + 0.5; // 0-1 gradient wave
+    // Make gradient pulse more pronounced - creates visible traveling wave
+    float pulseIntensity = smoothstep(0.2, 0.8, pulseGradient); // Smooth gradient transition
+    
+    // Apply gradient pulse to brush intensity - creates traveling wave effect
+    // The pulse travels around the brush, reducing intensity in a wave pattern
+    // Keep minimum much higher for better visibility
+    float gradientEffect = mix(1.0, 0.75 + pulseIntensity * 0.25, pulseStrength * 0.4);
+    
+    // Combine gap effect with gradient pulse
+    // Gaps smoothly appear/disappear, gradient creates traveling wave
+    // Reduce gap effect strength significantly to maintain visibility
+    float gapEffect = mix(1.0, 0.3 + combinedGap * 0.7, pulseStrength * 0.6); // Gaps reduce less, maintain more visibility
+    
+    pulseMask = gapEffect * gradientEffect;
+  }
 
   // Base sinusoidal gap pattern along the stroke
   float gapBase = sin(rotatedAngle * 0.95 + seed * 0.4);
@@ -258,6 +313,9 @@ float getBrushEffect(
 
   // Apply gap mask to combined stroke intensity
   //totalBrush *= gapPattern;
+  
+  // Apply pulsing mask - creates living organ effect with pinches
+  totalBrush *= pulseMask;
 
   // Final brush intensity for this pixel
   return totalBrush;
