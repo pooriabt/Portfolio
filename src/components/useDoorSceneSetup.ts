@@ -244,12 +244,12 @@ export function useDoorSceneSetup({
       { x: 6.9, y: 4, z: -8 },
     ];
 
-    // Load font for wavy text (using same font as English text)
+    // Load font for wavy text (using Montserrat Black Regular)
     const loadWavyTexts = () =>
       new Promise<void>((resolve) => {
         const loader = new FontLoader();
         loader.load(
-          englishFontJsonPath,
+          "/assets/fonts/montserrat black_regular.json",
           (font) => {
             if (spiral?.material?.uniforms) {
               const spiralUniforms = spiral.material.uniforms;
@@ -259,7 +259,7 @@ export function useDoorSceneSetup({
                   font: font,
                   position: baseTextPositions[index], // Use base positions initially
                   size: baseTextSize, // Use base size initially
-                  color: "#ffffff",
+                  color: "#ff00ff",
                   onClick: () => {
                     console.log(`Clicked: ${label}`);
 

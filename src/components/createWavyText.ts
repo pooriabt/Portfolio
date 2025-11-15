@@ -64,9 +64,9 @@ export function createWavyText(options: WavyTextOptions): THREE.Mesh {
     uSpeed: spiralUniforms?.uSpeed || { value: 0.7 },
     uBands: spiralUniforms?.uBands || { value: 20.0 },
     uColor: { value: new THREE.Color(color) },
-    uDistortionStrength: { value: 0.05 }, // Increased for visible ripple effect
+    uDistortionStrength: { value: 0.04 }, // Increased for visible ripple effect
     uRippleIntensity: { value: 0.2 }, // Decreased ripple intensity
-    uBorderColor: { value: new THREE.Color(0x00ffff) }, // Cyan border color
+    uSurfaceColor: { value: new THREE.Color(0x00ffff) }, // Cyan surface color
   };
 
   const vertexShader = /* glsl */ `
@@ -157,7 +157,7 @@ export function createWavyText(options: WavyTextOptions): THREE.Mesh {
     uniform float uSpeed;
     uniform float uBands;
     uniform float uRippleIntensity;
-    uniform vec3 uBorderColor;
+    uniform vec3 uSurfaceColor;
     
     varying vec2 vUv;
     varying vec3 vPosition;
@@ -189,49 +189,15 @@ export function createWavyText(options: WavyTextOptions): THREE.Mesh {
       float brightnessBoost = 1.0 + rippleGlow * 0.2 * uRippleIntensity;
       float opacityBoost = rippleGlow * 0.1 * uRippleIntensity;
       
-      // Final color with ripple effect
-      vec3 finalColor = uColor * brightnessBoost;
+      // Base color with ripple effect - this will be the surface color
+      vec3 baseColor = uColor * brightnessBoost;
+      
+      // Apply color to text surface (uses uColor parameter or uSurfaceColor)
+      vec3 surfaceColor = uColor * brightnessBoost;
+      
+      // No border - just use the surface color
+      vec3 finalColor = surfaceColor;
       float finalOpacity = min(1.0, baseOpacity + opacityBoost);
-      
-      // Add colored border/outline ONLY on outer edges
-      // Text surface color should remain unchanged - only border gets color
-      vec2 texelSize = 1.0 / uResolution;
-      
-      // Create outline effect using screen-space edge detection
-      // This detects the actual edges of the text geometry
-      vec2 screenCoord = gl_FragCoord.xy;
-      
-      // Calculate edge detection using screen-space derivatives
-      // This will be high at geometry edges, low in the center
-      float edgeX = length(dFdx(vScreenUv));
-      float edgeY = length(dFdy(vScreenUv));
-      float edge = max(edgeX, edgeY);
-      
-      // Detect edges more precisely
-      // Adjust threshold to catch only the actual geometry edges
-      float edgeThreshold = 0.0008;
-      float edgeStrength = smoothstep(edgeThreshold, edgeThreshold * 4.0, edge);
-      
-      // Create border outline - only on the very edge of the geometry
-      // Use a narrow border width to create a clean outline
-      float borderWidth = 0.0015; // Border width in normalized screen space
-      float borderFactor = smoothstep(borderWidth * 0.3, borderWidth, edgeStrength);
-      
-      // Ensure border only appears on actual edges (not in text center)
-      // Use a threshold to filter out weak edge signals
-      float borderThreshold = 0.6;
-      float showBorder = step(borderThreshold, borderFactor);
-      
-      // Apply border color ONLY on edges
-      // Text surface (finalColor) remains completely unchanged
-      vec3 borderColor = uBorderColor;
-      
-      // Mix: border color on edges ONLY, original text color everywhere else
-      // This ensures text surface is NOT affected by border color
-      vec3 outlinedColor = mix(finalColor, borderColor, showBorder);
-      
-      // Final color - text surface color preserved, only border has color
-      finalColor = outlinedColor;
       
       gl_FragColor = vec4(finalColor, finalOpacity);
     }
