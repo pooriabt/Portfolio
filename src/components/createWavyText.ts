@@ -64,7 +64,9 @@ export function createWavyText(options: WavyTextOptions): THREE.Mesh {
     uSpeed: spiralUniforms?.uSpeed || { value: 0.7 },
     uBands: spiralUniforms?.uBands || { value: 20.0 },
     uColor: { value: new THREE.Color(color) },
-    uDistortionStrength: { value: 0.05 }, // Reduced distortion to prevent double/ghost effect
+    uDistortionStrength: { value: 0.05 }, // Increased for visible ripple effect
+    uRippleIntensity: { value: 0.2 }, // Decreased ripple intensity
+    uBorderColor: { value: new THREE.Color(0x00ffff) }, // Cyan border color
   };
 
   const vertexShader = /* glsl */ `
@@ -79,6 +81,7 @@ export function createWavyText(options: WavyTextOptions): THREE.Mesh {
     varying vec2 vUv;
     varying vec3 vPosition;
     varying vec2 vScreenUv;
+    varying float vRippleValue; // Pass ripple value to fragment shader
     
     void main() {
       vUv = uv;
@@ -121,13 +124,23 @@ export function createWavyText(options: WavyTextOptions): THREE.Mesh {
       float totalWeight = w0 + w1;
       float combined = totalWeight > 0.001 ? (v0 * w0 + v1 * w1) / totalWeight : (v0 + v1) * 0.5;
       
-      // Convert to wave value (0 to 1) - smoother, less extreme
-      float wave = smoothstep(0.0, 0.2, combined);
+      // Convert to wave value (0 to 1) - create visible ripple pattern
+      // Use the raw combined value for more dynamic ripple effect
+      float ripple = combined; // Raw spiral value (-1 to 1)
+      float wave = ripple * 0.5 + 0.5; // Convert to 0-1 range
       
-      // Apply subtle distortion to vertex position
-      // Use a gentler wave that doesn't create double vision
-      // Distort along a single direction (up/down) instead of along normal
-      vec3 offset = vec3(0.0, wave * uDistortionStrength * 0.3, 0.0);
+      // Pass ripple value to fragment shader for color modulation
+      vRippleValue = ripple;
+      
+      // Apply visible distortion to vertex position
+      // Create multi-directional ripple distortion for more organic effect
+      // Distort both horizontally and vertically based on ripple pattern
+      vec2 rippleDir = normalize(p0 + p1); // Direction of ripple
+      vec3 offset = vec3(
+        rippleDir.x * ripple * uDistortionStrength,
+        rippleDir.y * ripple * uDistortionStrength,
+        0.0
+      );
       
       vec3 distortedPosition = position + offset;
       
@@ -143,73 +156,84 @@ export function createWavyText(options: WavyTextOptions): THREE.Mesh {
     uniform vec2 uCenter1;
     uniform float uSpeed;
     uniform float uBands;
+    uniform float uRippleIntensity;
+    uniform vec3 uBorderColor;
     
     varying vec2 vUv;
     varying vec3 vPosition;
     varying vec2 vScreenUv;
+    varying float vRippleValue;
     
     void main() {
-      // Use pre-calculated screen UV from vertex shader
-      vec2 screenUv = vScreenUv;
+      // Create visible ripple effect on text
+      // Use the ripple value passed from vertex shader (raw spiral value -1 to 1)
+      // This is already calculated in vertex shader, no need to recalculate
+      float ripple = vRippleValue;
       
-      // Calculate spiral ripple effect for color modulation
-      float t = uTime * uSpeed;
-      float aspect = uResolution.x / max(1.0, uResolution.y);
+      // Create wave pattern that makes text more visible when ripple passes through
+      // Convert ripple (-1 to 1) to a wave pattern (0 to 1)
+      float rippleWave = ripple * 0.5 + 0.5; // 0 to 1
       
-      vec2 p0 = screenUv - uCenter0;
-      p0.x *= aspect;
-      float r0 = length(p0);
-      float a0 = atan(p0.y, p0.x);
-      float spiral0 = a0 + r0 * 6.0 - t * 0.7;
-      float v0 = sin(spiral0 * uBands);
+      // Create pulsing/glowing effect when ripple is strong
+      // Text becomes brighter and more opaque when ripple wave passes through
+      float rippleStrength = abs(ripple); // 0 to 1, how strong the ripple is
       
-      vec2 p1 = screenUv - uCenter1;
-      p1.x *= aspect;
-      float r1 = length(p1);
-      float a1 = atan(p1.y, p1.x);
-      float spiral1 = a1 + r1 * 6.0 - t * 0.7;
-      float v1 = sin(spiral1 * uBands);
+      // Base opacity - text is always visible
+      float baseOpacity = 0.95;
       
-      float d0 = distance(screenUv, uCenter0);
-      float d1 = distance(screenUv, uCenter1);
-      float blendDist = 0.25;
-      float w0 = exp(-d0 / blendDist);
-      float w1 = exp(-d1 / blendDist);
-      float totalWeight = w0 + w1;
-      float combined = totalWeight > 0.001 ? (v0 * w0 + v1 * w1) / totalWeight : (v0 + v1) * 0.5;
+      // Ripple effect: text becomes more visible (brighter, more opaque) when ripple passes
+      // Create a wave that travels across the text
+      float rippleGlow = sin(ripple * 3.14159) * 0.5 + 0.5; // Convert to 0-1 wave
       
-      // Modulate color based on spiral ripple (subtle effect)
-      float ripple = smoothstep(0.0, 0.2, combined);
-      vec3 finalColor = uColor * (0.8 + ripple * 0.4); // Slight brightness variation
+      // Apply ripple intensity (decreased)
+      float brightnessBoost = 1.0 + rippleGlow * 0.2 * uRippleIntensity;
+      float opacityBoost = rippleGlow * 0.1 * uRippleIntensity;
       
-      // Add border/outline for better visibility
-      // Use a simple approach: add a darker/black border around text edges
-      // This creates better contrast against the spiral background
+      // Final color with ripple effect
+      vec3 finalColor = uColor * brightnessBoost;
+      float finalOpacity = min(1.0, baseOpacity + opacityBoost);
       
-      // Create a border by checking distance to edges in screen space
-      // This works better for text geometry
-      vec2 screenCoord = gl_FragCoord.xy / uResolution;
-      float borderThickness = 0.002; // Border thickness in screen space
-      
-      // Sample nearby pixels to create outline effect
-      // For text, we'll add a subtle dark border
-      vec3 borderColor = vec3(0.0, 0.0, 0.0); // Black border for contrast
-      float borderMix = 0.0;
-      
-      // Add border by slightly darkening the edges
-      // This creates a subtle outline effect
-      float edgeFactor = 1.0;
+      // Add colored border/outline ONLY on outer edges
+      // Text surface color should remain unchanged - only border gets color
       vec2 texelSize = 1.0 / uResolution;
       
-      // Simple border: darken edges slightly for better visibility
-      // The border will be applied as a subtle darkening around text edges
-      float borderStrength = 0.3; // How strong the border is
-      vec3 outlinedColor = mix(finalColor, borderColor, borderStrength * 0.4);
+      // Create outline effect using screen-space edge detection
+      // This detects the actual edges of the text geometry
+      vec2 screenCoord = gl_FragCoord.xy;
       
-      // Use the outlined color for better visibility
+      // Calculate edge detection using screen-space derivatives
+      // This will be high at geometry edges, low in the center
+      float edgeX = length(dFdx(vScreenUv));
+      float edgeY = length(dFdy(vScreenUv));
+      float edge = max(edgeX, edgeY);
+      
+      // Detect edges more precisely
+      // Adjust threshold to catch only the actual geometry edges
+      float edgeThreshold = 0.0008;
+      float edgeStrength = smoothstep(edgeThreshold, edgeThreshold * 4.0, edge);
+      
+      // Create border outline - only on the very edge of the geometry
+      // Use a narrow border width to create a clean outline
+      float borderWidth = 0.0015; // Border width in normalized screen space
+      float borderFactor = smoothstep(borderWidth * 0.3, borderWidth, edgeStrength);
+      
+      // Ensure border only appears on actual edges (not in text center)
+      // Use a threshold to filter out weak edge signals
+      float borderThreshold = 0.6;
+      float showBorder = step(borderThreshold, borderFactor);
+      
+      // Apply border color ONLY on edges
+      // Text surface (finalColor) remains completely unchanged
+      vec3 borderColor = uBorderColor;
+      
+      // Mix: border color on edges ONLY, original text color everywhere else
+      // This ensures text surface is NOT affected by border color
+      vec3 outlinedColor = mix(finalColor, borderColor, showBorder);
+      
+      // Final color - text surface color preserved, only border has color
       finalColor = outlinedColor;
       
-      gl_FragColor = vec4(finalColor, 1.0);
+      gl_FragColor = vec4(finalColor, finalOpacity);
     }
   `;
 
@@ -219,16 +243,27 @@ export function createWavyText(options: WavyTextOptions): THREE.Mesh {
     uniforms: uniforms as any,
     transparent: true,
     side: THREE.DoubleSide,
+    depthTest: true,
+    depthWrite: false, // Important for proper rendering with transparency
   });
 
   const mesh = new THREE.Mesh(geometry, material);
   mesh.position.set(position.x, position.y, position.z);
   mesh.renderOrder = 100; // Render on top
 
+  // Store initial values for animation
+  const initialScale = 1.0;
+  const initialDistortionStrength = uniforms.uDistortionStrength.value;
+  const initialRippleIntensity = uniforms.uRippleIntensity.value;
+
   // Add click handler if provided
   if (onClick) {
     mesh.userData.onClick = onClick;
     mesh.userData.isClickable = true;
+    mesh.userData.initialScale = initialScale;
+    mesh.userData.initialDistortionStrength = initialDistortionStrength;
+    mesh.userData.initialRippleIntensity = initialRippleIntensity;
+    mesh.userData.isAnimating = false;
   }
 
   return mesh;

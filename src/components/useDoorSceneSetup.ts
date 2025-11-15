@@ -238,10 +238,10 @@ export function useDoorSceneSetup({
     // Base values for full-screen (will be used in updateSizing)
     const baseTextSize = 0.5; // Full-screen text size
     const baseTextPositions = [
-      { x: -6, y: 3, z: -8 }, // Full-screen positions
-      { x: -2, y: 3, z: -8 },
-      { x: 2, y: 3, z: -8 },
-      { x: 6, y: 3, z: -8 },
+      { x: -6.9, y: 4, z: -8 }, // Full-screen positions
+      { x: -2.3, y: 4, z: -8 },
+      { x: 2.3, y: 4, z: -8 },
+      { x: 6.9, y: 4, z: -8 },
     ];
 
     // Load font for wavy text (using same font as English text)
@@ -262,6 +262,88 @@ export function useDoorSceneSetup({
                   color: "#ffffff",
                   onClick: () => {
                     console.log(`Clicked: ${label}`);
+
+                    // Prevent multiple simultaneous animations
+                    if (textMesh.userData.isAnimating) return;
+                    textMesh.userData.isAnimating = true;
+
+                    // Get material uniforms
+                    const material = textMesh.material as THREE.ShaderMaterial;
+                    const uniforms = material.uniforms;
+
+                    // Get initial values
+                    const initialScale = textMesh.userData.initialScale || 1.0;
+                    const initialDistortionStrength =
+                      textMesh.userData.initialDistortionStrength || 0.05;
+                    const initialRippleIntensity =
+                      textMesh.userData.initialRippleIntensity || 0.2;
+
+                    // Get current scale (might be different due to responsive sizing)
+                    const currentScale = textMesh.scale.x;
+
+                    // Animate to clicked state: scale 2x, distortion/ripple 3x
+                    const targetScale = currentScale * 1.4;
+                    const targetDistortionStrength =
+                      initialDistortionStrength * 2.0;
+                    const targetRippleIntensity = initialRippleIntensity * 2.0;
+
+                    // Create animation timeline
+                    const tl = gsap.timeline({
+                      onComplete: () => {
+                        // After 2 seconds, animate back to initial state
+                        gsap.to(textMesh.scale, {
+                          x: currentScale,
+                          y: currentScale,
+                          z: currentScale,
+                          duration: 0.5,
+                          ease: "power2.out",
+                        });
+                        gsap.to(uniforms.uDistortionStrength, {
+                          value: initialDistortionStrength,
+                          duration: 0.5,
+                          ease: "power2.out",
+                        });
+                        gsap.to(uniforms.uRippleIntensity, {
+                          value: initialRippleIntensity,
+                          duration: 0.5,
+                          ease: "power2.out",
+                          onComplete: () => {
+                            textMesh.userData.isAnimating = false;
+                          },
+                        });
+                      },
+                    });
+
+                    // Animate scale and uniforms simultaneously
+                    tl.to(textMesh.scale, {
+                      x: targetScale,
+                      y: targetScale,
+                      z: targetScale,
+                      duration: 0.3,
+                      ease: "power2.out",
+                    });
+                    tl.to(
+                      uniforms.uDistortionStrength,
+                      {
+                        value: targetDistortionStrength,
+                        duration: 0.3,
+                        ease: "power2.out",
+                      },
+                      "<"
+                    ); // Start at same time as scale
+                    tl.to(
+                      uniforms.uRippleIntensity,
+                      {
+                        value: targetRippleIntensity,
+                        duration: 0.3,
+                        ease: "power2.out",
+                      },
+                      "<"
+                    ); // Start at same time as scale
+
+                    // Wait 2 seconds before returning
+                    tl.to({}, { duration: 0.75 });
+
                     // Add your navigation logic here
                   },
                   spiralUniforms: {
@@ -422,18 +504,82 @@ export function useDoorSceneSetup({
       const pointer = new THREE.Vector2();
       pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
       pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-      const raycaster = new THREE.Raycaster();
-      raycaster.setFromCamera(pointer, camera);
 
-      // Check wavy text clicks first
-      const textIntersects = raycaster.intersectObjects(wavyTexts, true);
-      if (textIntersects.length > 0) {
-        const clickedMesh = textIntersects[0].object as THREE.Mesh;
-        if (clickedMesh.userData.isClickable && clickedMesh.userData.onClick) {
-          clickedMesh.userData.onClick();
+      // Check wavy text clicks using bounding box (allows clicking inside letters)
+      // This method checks if click is within the text's bounding box in screen space
+      // Works even for letters with holes like "O", "A", "B", etc.
+      const clickPoint = new THREE.Vector2(event.clientX, event.clientY);
+
+      for (let i = 0; i < wavyTexts.length; i++) {
+        const textMesh = wavyTexts[i];
+        if (!textMesh.userData.isClickable || !textMesh.userData.onClick)
+          continue;
+
+        // Compute bounding box in world space
+        if (!textMesh.geometry.boundingBox) {
+          textMesh.geometry.computeBoundingBox();
+        }
+        const bbox = textMesh.geometry.boundingBox!.clone();
+
+        // Transform bounding box to world space
+        bbox.applyMatrix4(textMesh.matrixWorld);
+
+        // Project bounding box corners to screen space
+        const corners = [
+          new THREE.Vector3(bbox.min.x, bbox.min.y, bbox.min.z),
+          new THREE.Vector3(bbox.max.x, bbox.min.y, bbox.min.z),
+          new THREE.Vector3(bbox.min.x, bbox.max.y, bbox.min.z),
+          new THREE.Vector3(bbox.max.x, bbox.max.y, bbox.min.z),
+          new THREE.Vector3(bbox.min.x, bbox.min.y, bbox.max.z),
+          new THREE.Vector3(bbox.max.x, bbox.min.y, bbox.max.z),
+          new THREE.Vector3(bbox.min.x, bbox.max.y, bbox.max.z),
+          new THREE.Vector3(bbox.max.x, bbox.max.y, bbox.max.z),
+        ];
+
+        // Project all corners to screen space
+        const screenCorners = corners.map((corner) => {
+          const vector = corner.clone();
+          vector.project(camera);
+          return new THREE.Vector2(
+            ((vector.x + 1) / 2) * rect.width + rect.left,
+            ((1 - vector.y) / 2) * rect.height + rect.top
+          );
+        });
+
+        // Find min/max in screen space
+        let minX = Infinity,
+          maxX = -Infinity,
+          minY = Infinity,
+          maxY = -Infinity;
+        screenCorners.forEach((corner) => {
+          minX = Math.min(minX, corner.x);
+          maxX = Math.max(maxX, corner.x);
+          minY = Math.min(minY, corner.y);
+          maxY = Math.max(maxY, corner.y);
+        });
+
+        // Add padding for easier clicking (10% on each side)
+        const paddingX = (maxX - minX) * 0.1;
+        const paddingY = (maxY - minY) * 0.1;
+        minX -= paddingX;
+        maxX += paddingX;
+        minY -= paddingY;
+        maxY += paddingY;
+
+        // Check if click is within bounding box
+        if (
+          clickPoint.x >= minX &&
+          clickPoint.x <= maxX &&
+          clickPoint.y >= minY &&
+          clickPoint.y <= maxY
+        ) {
+          textMesh.userData.onClick();
           return;
         }
       }
+
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(pointer, camera);
 
       const intersects = raycaster.intersectObjects(
         [leftPortal.mesh, rightPortal.mesh],
@@ -796,23 +942,56 @@ export function useDoorSceneSetup({
         const positionScaleX = frustumWidthAtText / baseFrustumWidth;
         const positionScaleY = frustumHeightAtText / baseFrustumHeight;
 
-        // Update each text mesh
+        // First, position all texts and calculate their bounding box to find center
+        const tempPositions: THREE.Vector3[] = [];
         wavyTexts.forEach((textMesh, index) => {
           // Scale positions from base full-screen positions
           const basePos = baseTextPositions[index];
-          textMesh.position.set(
-            basePos.x * positionScaleX,
-            basePos.y * positionScaleY,
-            basePos.z
-          );
+          const scaledX = basePos.x * positionScaleX;
+          const scaledY = basePos.y * positionScaleY;
+
+          // Set position temporarily
+          textMesh.position.set(scaledX, scaledY, basePos.z);
 
           // Scale text size based on screen width breakpoints ONLY
           // The geometry was created with baseTextSize, so we scale the mesh
           // Use ONLY sizeScale (from breakpoints), NOT viewportScale (which is only for positions)
           textMesh.scale.setScalar(sizeScale);
 
-          // Debug: log to verify values are being applied
-          // console.log(`Text ${index}: pos(${textMesh.position.x.toFixed(2)}, ${textMesh.position.y.toFixed(2)}), scale(${viewportScale.toFixed(3)})`);
+          // Update matrix to get accurate world position
+          textMesh.updateMatrixWorld(true);
+
+          // Calculate bounding box in world space
+          if (!textMesh.geometry.boundingBox) {
+            textMesh.geometry.computeBoundingBox();
+          }
+          const bbox = textMesh.geometry.boundingBox!.clone();
+          bbox.applyMatrix4(textMesh.matrixWorld);
+
+          tempPositions.push(new THREE.Vector3(bbox.min.x, 0, 0));
+          tempPositions.push(new THREE.Vector3(bbox.max.x, 0, 0));
+        });
+
+        // Calculate the center of all texts
+        let minX = Infinity;
+        let maxX = -Infinity;
+        tempPositions.forEach((pos) => {
+          minX = Math.min(minX, pos.x);
+          maxX = Math.max(maxX, pos.x);
+        });
+        const groupCenterX = (minX + maxX) / 2;
+
+        // Calculate offset to center the group at x=0
+        const centerOffsetX = -groupCenterX;
+
+        // Apply the offset to center all texts
+        wavyTexts.forEach((textMesh, index) => {
+          const basePos = baseTextPositions[index];
+          const scaledX = basePos.x * positionScaleX;
+          const scaledY = basePos.y * positionScaleY;
+
+          // Apply center offset to x position
+          textMesh.position.set(scaledX + centerOffsetX, scaledY, basePos.z);
         });
       }
 
