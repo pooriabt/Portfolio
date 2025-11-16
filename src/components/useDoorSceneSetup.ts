@@ -228,6 +228,14 @@ export function useDoorSceneSetup({
       );
       // Store original hole radius values for animation (will be set after first resize)
       // Initial hole radius will be set to 0 after first resize
+      // Initialize spiral gradient/scroll fade uniforms
+      if (spiral.material?.uniforms) {
+        const su = spiral.material.uniforms as any;
+        if (su.uScrollFade) su.uScrollFade.value = 1.0;
+        if (su.uGradientStartFromTop) su.uGradientStartFromTop.value = 0.75; // start at 3/4 from top
+        if (su.uGradientStrength) su.uGradientStrength.value = 0.9;
+        if (su.uPulseSpeed) su.uPulseSpeed.value = 1.8;
+      }
     } catch (err) {
       console.error("Failed to create spiral background:", err);
     }
@@ -808,8 +816,9 @@ export function useDoorSceneSetup({
       leftPortal.uniforms.uBrushWidth.value = brushWidthValue;
       rightPortal.uniforms.uBrushWidth.value = brushWidthValue;
 
-      leftPortal.uniforms.uBrushOuterScale.value = portalBrushOuterScalar;
-      rightPortal.uniforms.uBrushOuterScale.value = portalBrushOuterScalar;
+      leftPortal.uniforms.uBrushOuterScale.value = portalBrushOuterScalar * 1.5;
+      rightPortal.uniforms.uBrushOuterScale.value =
+        portalBrushOuterScalar * 1.5;
 
       const portalWidthWorld = frustumWidth * tmpInnerHole.x * 2;
       const portalHeightWorld = frustumHeight * tmpInnerHole.y * 2;
@@ -1308,6 +1317,10 @@ export function useDoorSceneSetup({
                   spiralHole.set(0, 0);
                   spiralOuter.set(0, 0);
                 }
+                // Reset gradient scroll fade fully on enter
+                if ((spiral.material.uniforms as any).uScrollFade) {
+                  (spiral.material.uniforms as any).uScrollFade.value = 1.0;
+                }
               }
             },
             onLeaveBack: () => {
@@ -1339,6 +1352,9 @@ export function useDoorSceneSetup({
                 if (spiralHole && spiralOuter) {
                   spiralHole.set(0, 0);
                   spiralOuter.set(0, 0);
+                }
+                if ((spiral.material.uniforms as any).uScrollFade) {
+                  (spiral.material.uniforms as any).uScrollFade.value = 1.0;
                 }
               }
             },
@@ -1376,8 +1392,32 @@ export function useDoorSceneSetup({
                     spiralHole.set(0, 0);
                     spiralOuter.set(0, 0);
                   }
+                  // Reset gradient fade
+                  if ((spiral.material.uniforms as any).uScrollFade) {
+                    (spiral.material.uniforms as any).uScrollFade.value = 1.0;
+                  }
                 }
                 return; // Early return to avoid unnecessary calculations
+              }
+
+              // Smoothly fade out the gradient as soon as scrolling starts
+              if (spiral?.material?.uniforms) {
+                const su = spiral.material.uniforms as any;
+                if (su.uScrollFade) {
+                  // Fade to 0 over first ~10% of scroll; ease with smoothstep
+                  const startFade = 0.0;
+                  const endFade = 0.1;
+                  const k = Math.max(
+                    0,
+                    Math.min(
+                      1,
+                      (progress - startFade) /
+                        Math.max(endFade - startFade, 1e-6)
+                    )
+                  );
+                  const eased = k * k * (3.0 - 2.0 * k); // smoothstep
+                  su.uScrollFade.value = 1.0 - eased;
+                }
               }
 
               // ============================================
