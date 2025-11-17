@@ -1,5 +1,6 @@
 // src/components/SpiralBackground.ts
 import * as THREE from "three";
+import gsap from "gsap";
 import { projectObjectToScreenUv, setPortalHoleRadius } from "./portalMath";
 
 /**
@@ -52,6 +53,16 @@ export function createSpiralBackground(
     uGradientBandWidth: { value: 0.22 },
     // base half-width of the triangle at its top line (in uv x units)
     uTriBaseHalfWidth: { value: 0.17 },
+    // Arrow animation control: 0 = normal, 1 = restart from top
+    uArrowAnimationRestart: { value: 0.0 },
+    // Time offset for restart animation
+    uArrowRestartTime: { value: 0.0 },
+    // Starting offset when restart begins (to smoothly transition from current position)
+    uArrowRestartStartOffset: { value: 0.0 },
+    // Track if restart has ever reached midpoint (to always use restartOffset after that)
+    uArrowRestartHasStarted: { value: 0.0 },
+    // Arrow animation visibility: 0 = hidden, 1 = visible
+    uArrowAnimationVisible: { value: 0.0 },
   };
 
   // vertex shader (pass uv)
@@ -85,12 +96,26 @@ export function createSpiralBackground(
   uniform float uGradientFlowSpeed;
   uniform float uGradientBandWidth;
   uniform float uTriBaseHalfWidth;
+  uniform float uArrowAnimationRestart;
+  uniform float uArrowRestartTime;
+  uniform float uArrowRestartStartOffset;
+  uniform float uArrowRestartHasStarted;
+  uniform float uArrowAnimationVisible;
 
   // Band shape helper (creates a single moving band centered at phase 'o')
   float bandAt(float o, float ss, float width) {
     float h = smoothstep(o - width, o, ss);
     float tt = 1.0 - smoothstep(o, o + width, ss);
     return clamp(h * tt, 0.0, 1.0);
+  }
+  
+  // Wrap-around aware band function for gradient animation
+  // Handles the case when offset wraps from 1.0 to 0.0 smoothly
+  // IMPORTANT: Only creates bands in forward direction (top to bottom) to prevent reversal
+  float bandAtWrapped(float o, float ss, float width) {
+    // Always use normal band calculation - it only creates forward bands
+    // The normal bandAt function already handles the forward direction correctly
+    return bandAt(o, ss, width);
   }
   
   // Distance from point p to segment AB (screen-space)
@@ -313,13 +338,39 @@ export function createSpiralBackground(
       float falloffRange = mix(1.8, 1.6, isCenterLine); // Normal falloff for good coverage
       float lineMask = 1.0 - smoothstep(width, width * falloffRange, d);
 
-      // Moving gradient from top to bottom - synchronized across lines
+      // Arrow animation: moving gradient from top to bottom - synchronized across lines
       // Faster speed to encourage scrolling down
-      // Use full range 0-1 to cover complete path
-      float gradOffset = fract(uTime * 0.6);
+      // When uArrowAnimationRestart is active, smoothly transition from starting position to top
+      float normalTime = uTime * 0.6;
+      float normalOffset = fract(normalTime);
+      float restartTime = uArrowRestartTime * 0.6; // Restart time offset (starts at 0)
+      float restartOffset = fract(restartTime);
+      
+      // During restart transition: smoothly interpolate from starting offset to 0 (top)
+      // When restart is 0: use normal offset (only initially, before restart has been active)
+      // When restart transitions 0->1: smoothly go from start offset to 0
+      // When restart is 1: use restart offset (which continues from 0)
+      // When restart transitions back 1->0: continue using restart offset to maintain direction
+      float transitionStart = uArrowRestartStartOffset; // Starting position when restart began
+      float transitionEnd = 0.0; // Top position
+      float transitionOffset = mix(transitionStart, transitionEnd, uArrowAnimationRestart);
+      
+      // Arrow animation: Start directly from top (0.0) and go down, no transition
+      // When restart is active, immediately use restartOffset starting from 0.0
+      // Skip transitionOffset to avoid the "go up then down" animation
+      float isRestartActive = step(0.01, uArrowAnimationRestart); // 1 if restart > 0.01
+      
+      // Use normal offset only when completely inactive
+      // Use restartOffset immediately when restart is active (starts at 0.0, goes to 1.0)
+      float useNormal = 1.0 - isRestartActive;
+      float useRestart = isRestartActive;
+      
+      float gradOffset = normalOffset * useNormal
+                        + restartOffset * useRestart;
       // Wider gradient band to ensure full path coverage
       float extendedGradWidth = lineGradWidth * 1.8; // Much wider for complete path visibility
-      // Use bandAt function with extended width to cover full path
+      // Always use normal bandAt - it ensures forward direction only (top to bottom)
+      // The offset calculation already handles the wrap-around correctly
       float gradBand = bandAt(gradOffset, tl, extendedGradWidth);
 
       // Triangle region mask - will be handled per-line below
@@ -367,7 +418,8 @@ export function createSpiralBackground(
     // Compensate for narrower domain by increasing intensity so filling is as strong as before
     // Higher multiplier to ensure center line matches other lines' filling intensity
     float enhancedColorStrength = lineColorStrength * 4.0; // Increased to ensure all lines have strong filling
-    float colorIntensity = lineWhiteSpace * whiteSpaceMask * enhancedColorStrength;
+    // Apply arrow animation visibility - only show when visible is 1.0
+    float colorIntensity = lineWhiteSpace * whiteSpaceMask * enhancedColorStrength * uArrowAnimationVisible;
 
     // Apply teal color to white spaces found along line paths
     color = mix(color, uGradientColor, colorIntensity);
@@ -445,12 +497,150 @@ export function createSpiralBackground(
     updateCenters();
   }
 
+  // Arrow animation state
+  let pageLoadTime = Date.now();
+  let lastScrollTime = Date.now();
+  let arrowRestartTween: gsap.core.Tween | null = null;
+  let arrowVisibilityTween: gsap.core.Tween | null = null;
+  let isScrolling = false;
+  let restartTimeOffset = 0.0; // Time offset to reset animation when restarting
+  let hasStartedRestartAnimation = false; // Flag to prevent resetting restartTimeOffset every frame
+
   function update(timeSec: number) {
     uniforms.uTime.value = timeSec;
     updateCenters();
+
+    // Arrow animation: after 5 seconds of no scroll, show and restart from top
+    const currentTime = Date.now();
+    const timeSinceLoad = (currentTime - pageLoadTime) / 1000;
+    const timeSinceScroll = (currentTime - lastScrollTime) / 1000;
+
+    // Update restart time continuously as long as animation is active
+    // This MUST run every frame once started to keep animation looping
+    // Start from 0.0 and continuously increase, wrapping naturally from 1.0 to 0.0
+    if (restartTimeOffset > 0.0) {
+      // Ensure restart stays at 1.0 to keep animation active
+      uniforms.uArrowAnimationRestart.value = 1.0;
+      // Ensure visibility stays at 1.0 to keep animation visible
+      uniforms.uArrowAnimationVisible.value = 1.0;
+      // Calculate restart time: current time minus offset, so it starts from 0
+      // This ensures restartOffset continuously increases from 0.0 to 1.0, then wraps to 0.0
+      // The direction is always forward (increasing) because timeSec always increases
+      // When it wraps, it naturally jumps back to 0.0 (top) and continues
+      // This continues indefinitely until restartTimeOffset is reset (on scroll)
+      // CRITICAL: This must update every frame to keep the animation looping
+      const calculatedRestartTime = timeSec - restartTimeOffset;
+      // Ensure restartTime is always updating (should always be >= 0 and increasing)
+      uniforms.uArrowRestartTime.value = Math.max(0.0, calculatedRestartTime);
+    }
+
+    // If 5 seconds have passed since page load and no scroll in last 5 seconds, show and start restart animation
+    if (timeSinceLoad >= 5.0 && timeSinceScroll >= 5.0 && !isScrolling) {
+      // Fade in visibility if not already visible
+      if (uniforms.uArrowAnimationVisible.value < 0.99) {
+        if (arrowVisibilityTween === null || !arrowVisibilityTween.isActive()) {
+          arrowVisibilityTween = gsap.to(uniforms.uArrowAnimationVisible, {
+            value: 1.0,
+            duration: 0.8,
+            ease: "power2.out",
+            onComplete: () => {
+              // After visibility is fully visible, start the restart animation from top
+              if (!hasStartedRestartAnimation) {
+                // Capture current offset position for smooth transition
+                const currentOffset = (timeSec * 0.6) % 1.0;
+                uniforms.uArrowRestartStartOffset.value = currentOffset;
+                // Initialize restartTimeOffset to current time so restartOffset starts at 0.0
+                restartTimeOffset = timeSec;
+                uniforms.uArrowRestartTime.value = 0.0; // Start at 0.0
+                // Mark as started immediately
+                uniforms.uArrowRestartHasStarted.value = 1.0;
+                // Start restart at 1.0 immediately (no transition animation)
+                // This makes restartOffset start updating right away from 0.0
+                uniforms.uArrowAnimationRestart.value = 1.0;
+                // Set flag to prevent resetting every frame
+                hasStartedRestartAnimation = true;
+              }
+            },
+          });
+        }
+      } else if (uniforms.uArrowAnimationVisible.value >= 0.99) {
+        // If already visible, start restart animation immediately if not already started
+        if (!hasStartedRestartAnimation) {
+          // Capture current offset position (not used but kept for consistency)
+          const currentOffset = (timeSec * 0.6) % 1.0;
+          uniforms.uArrowRestartStartOffset.value = currentOffset;
+          restartTimeOffset = timeSec;
+          uniforms.uArrowRestartTime.value = 0.0;
+          // Mark as started immediately
+          uniforms.uArrowRestartHasStarted.value = 1.0;
+          // Start restart at 1.0 immediately (no transition animation)
+          uniforms.uArrowAnimationRestart.value = 1.0;
+          // Set flag to prevent resetting every frame
+          hasStartedRestartAnimation = true;
+        }
+      }
+    }
+  }
+
+  // Handle scroll events - hide arrow animation when user scrolls
+  function handleScroll() {
+    lastScrollTime = Date.now();
+    isScrolling = true;
+
+    // Fade out visibility smoothly when user scrolls (do this first for smooth transition)
+    if (arrowVisibilityTween && arrowVisibilityTween.isActive()) {
+      arrowVisibilityTween.kill();
+    }
+    gsap.to(uniforms.uArrowAnimationVisible, {
+      value: 0.0,
+      duration: 0.8,
+      ease: "power2.inOut",
+    });
+
+    // Stop restart animation smoothly after a slight delay to allow visibility to fade
+    if (arrowRestartTween && arrowRestartTween.isActive()) {
+      arrowRestartTween.kill();
+    }
+    gsap.to(uniforms.uArrowAnimationRestart, {
+      value: 0.0,
+      duration: 0.8,
+      ease: "power2.inOut",
+      onComplete: () => {
+        // Reset restart time offset, start offset, has started flag, and animation flag when animation stops
+        restartTimeOffset = 0.0;
+        uniforms.uArrowRestartStartOffset.value = 0.0;
+        uniforms.uArrowRestartHasStarted.value = 0.0;
+        hasStartedRestartAnimation = false; // Reset flag so animation can start again
+      },
+    });
+
+    // Reset scrolling flag after a delay
+    setTimeout(() => {
+      isScrolling = false;
+    }, 100);
+  }
+
+  // Add scroll listener
+  if (typeof window !== "undefined") {
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    window.addEventListener("wheel", handleScroll, { passive: true });
+    window.addEventListener("touchmove", handleScroll, { passive: true });
   }
 
   function dispose() {
+    // Clean up scroll listeners
+    if (typeof window !== "undefined") {
+      window.removeEventListener("scroll", handleScroll);
+      window.removeEventListener("wheel", handleScroll);
+      window.removeEventListener("touchmove", handleScroll);
+    }
+    // Kill any active tweens
+    if (arrowRestartTween) {
+      arrowRestartTween.kill();
+    }
+    if (arrowVisibilityTween) {
+      arrowVisibilityTween.kill();
+    }
     parent.remove(plane);
     plane.geometry.dispose();
     mat.dispose();
