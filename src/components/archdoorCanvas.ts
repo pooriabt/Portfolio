@@ -23,7 +23,8 @@ export function createArchDoorCanvas(
   imageUrls: string[],
   width = 1024,
   height = 2048,
-  onUpdate?: () => void
+  onUpdate?: () => void,
+  showDebugOverlay = true
 ): ArchController {
   // create main canvas
   let currentWidth = width;
@@ -165,7 +166,9 @@ export function createArchDoorCanvas(
       drawClickEllipseOverlay(ctx, currentWidth, currentHeight);
     }
 
-    drawBlobDebugOverlay(ctx, state);
+    if (showDebugOverlay) {
+      drawBlobDebugOverlay(ctx, state);
+    }
   }
 
   // Random walk animation for blob movement

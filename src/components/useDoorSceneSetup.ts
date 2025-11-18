@@ -133,7 +133,8 @@ export function useDoorSceneSetup({
         2048,
         () => {
           if (archTexture) archTexture.needsUpdate = true;
-        }
+        },
+        false // Disable debug overlay for left portal
       );
       archController.start?.();
       archTexture = new THREE.CanvasTexture(archController.canvas);
@@ -468,13 +469,40 @@ export function useDoorSceneSetup({
       return dx * dx + dy * dy <= 1.0;
     };
 
-    renderer.domElement.style.cursor = "default";
-
-    function onPointerMove(event: PointerEvent) {
+    // Helper function to calculate pointer position from event
+    const getPointerFromEvent = (event: PointerEvent): THREE.Vector2 => {
       const rect = renderer.domElement.getBoundingClientRect();
       const pointer = new THREE.Vector2();
       pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
       pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      return pointer;
+    };
+
+    // Helper function to update spiral centers
+    const updateSpiralCenters = () => {
+      if (spiral?.material?.uniforms) {
+        const spiralUniforms = spiral.material.uniforms;
+        const leftCenter = leftPortal.uniforms.uCenter.value as THREE.Vector2;
+        const rightCenter = rightPortal.uniforms.uCenter.value as THREE.Vector2;
+        const spiralCenter0 = spiralUniforms.uCenter0?.value as
+          | THREE.Vector2
+          | undefined;
+        const spiralCenter1 = spiralUniforms.uCenter1?.value as
+          | THREE.Vector2
+          | undefined;
+        if (spiralCenter0 && leftCenter) {
+          spiralCenter0.copy(leftCenter);
+        }
+        if (spiralCenter1 && rightCenter) {
+          spiralCenter1.copy(rightCenter);
+        }
+      }
+    };
+
+    renderer.domElement.style.cursor = "default";
+
+    function onPointerMove(event: PointerEvent) {
+      const pointer = getPointerFromEvent(event);
       const raycaster = new THREE.Raycaster();
       raycaster.setFromCamera(pointer, camera);
       const intersects = raycaster.intersectObjects(
@@ -508,14 +536,12 @@ export function useDoorSceneSetup({
     }
 
     function onPointerDown(event: PointerEvent) {
-      const rect = renderer.domElement.getBoundingClientRect();
-      const pointer = new THREE.Vector2();
-      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      const pointer = getPointerFromEvent(event);
 
       // Check wavy text clicks using bounding box (allows clicking inside letters)
       // This method checks if click is within the text's bounding box in screen space
       // Works even for letters with holes like "O", "A", "B", etc.
+      const rect = renderer.domElement.getBoundingClientRect();
       const clickPoint = new THREE.Vector2(event.clientX, event.clientY);
 
       for (let i = 0; i < wavyTexts.length; i++) {
@@ -917,8 +943,10 @@ export function useDoorSceneSetup({
           targetTextSize = 0.43;
         } else if (viewportWidthCss > 600 && viewportWidthCss < 900) {
           targetTextSize = 0.35;
-        } else {
+        } else if (viewportWidthCss < 600 && viewportWidthCss > 400) {
           targetTextSize = 0.27;
+        } else {
+          targetTextSize = 0.2;
         }
 
         // Calculate scale factor to achieve target size from base size
@@ -1017,23 +1045,7 @@ export function useDoorSceneSetup({
         tmpVec3
       );
 
-      if (spiral?.material?.uniforms) {
-        const spiralUniforms = spiral.material.uniforms;
-        const leftCenter = leftPortal.uniforms.uCenter.value as THREE.Vector2;
-        const rightCenter = rightPortal.uniforms.uCenter.value as THREE.Vector2;
-        const spiralCenter0 = spiralUniforms.uCenter0?.value as
-          | THREE.Vector2
-          | undefined;
-        const spiralCenter1 = spiralUniforms.uCenter1?.value as
-          | THREE.Vector2
-          | undefined;
-        if (spiralCenter0 && leftCenter) {
-          spiralCenter0.copy(leftCenter);
-        }
-        if (spiralCenter1 && rightCenter) {
-          spiralCenter1.copy(rightCenter);
-        }
-      }
+      updateSpiralCenters();
     }
     updateSizing();
     window.addEventListener("resize", updateSizing);
@@ -1059,23 +1071,7 @@ export function useDoorSceneSetup({
         tmpVec3
       );
 
-      if (spiral?.material?.uniforms) {
-        const spiralUniforms = spiral.material.uniforms;
-        const leftCenter = leftPortal.uniforms.uCenter.value as THREE.Vector2;
-        const rightCenter = rightPortal.uniforms.uCenter.value as THREE.Vector2;
-        const spiralCenter0 = spiralUniforms.uCenter0?.value as
-          | THREE.Vector2
-          | undefined;
-        const spiralCenter1 = spiralUniforms.uCenter1?.value as
-          | THREE.Vector2
-          | undefined;
-        if (spiralCenter0 && leftCenter) {
-          spiralCenter0.copy(leftCenter);
-        }
-        if (spiralCenter1 && rightCenter) {
-          spiralCenter1.copy(rightCenter);
-        }
-      }
+      updateSpiralCenters();
 
       leftPortal.uniforms.uTime.value = elapsed;
       rightPortal.uniforms.uTime.value = elapsed * 1.05;
@@ -1276,6 +1272,42 @@ export function useDoorSceneSetup({
           farsi.rotation.set(0, 0, 0);
         }
 
+        // Helper function to reset scroll trigger state
+        const resetScrollTriggerState = () => {
+          if (english) {
+            english.scale.setScalar(1);
+            english.rotation.set(0, 0, 0);
+            english.position.set(
+              textControls.posX,
+              textControls.posY,
+              textControls.posZ
+            );
+          }
+          if (farsi) {
+            farsi.scale.setScalar(1);
+            farsi.rotation.set(0, 0, 0);
+          }
+          if (textGroupRef.current) {
+            textGroupRef.current.scale.setScalar(1);
+          }
+          // Reset portals to scale 0 and spiral holes to 0 at initial state
+          leftPortalGroup.scale.setScalar(0);
+          rightPortalGroup.scale.setScalar(0);
+          if (spiral?.material?.uniforms) {
+            const spiralHole = spiral.material.uniforms.uHoleRadius
+              ?.value as THREE.Vector2;
+            const spiralOuter = spiral.material.uniforms.uHoleRadiusOuter
+              ?.value as THREE.Vector2;
+            if (spiralHole && spiralOuter) {
+              spiralHole.set(0, 0);
+              spiralOuter.set(0, 0);
+            }
+            if ((spiral.material.uniforms as any).uScrollFade) {
+              (spiral.material.uniforms as any).uScrollFade.value = 1.0;
+            }
+          }
+        };
+
         if (textGroupRef.current && (english || farsi)) {
           const trigger = ScrollTrigger.create({
             trigger: mount,
@@ -1287,116 +1319,14 @@ export function useDoorSceneSetup({
             scrub: true,
             pin: true,
             pinSpacing: true,
-            onEnter: () => {
-              // Ensure initial state when entering the trigger
-              if (english) {
-                english.scale.setScalar(1);
-                english.rotation.set(0, 0, 0);
-                english.position.set(
-                  textControls.posX,
-                  textControls.posY,
-                  textControls.posZ
-                );
-              }
-              if (farsi) {
-                farsi.scale.setScalar(1);
-                farsi.rotation.set(0, 0, 0);
-              }
-              if (textGroupRef.current) {
-                textGroupRef.current.scale.setScalar(1);
-              }
-              // Reset portals to scale 0 and spiral holes to 0 at initial state
-              leftPortalGroup.scale.setScalar(0);
-              rightPortalGroup.scale.setScalar(0);
-              if (spiral?.material?.uniforms) {
-                const spiralHole = spiral.material.uniforms.uHoleRadius
-                  ?.value as THREE.Vector2;
-                const spiralOuter = spiral.material.uniforms.uHoleRadiusOuter
-                  ?.value as THREE.Vector2;
-                if (spiralHole && spiralOuter) {
-                  spiralHole.set(0, 0);
-                  spiralOuter.set(0, 0);
-                }
-                // Reset gradient scroll fade fully on enter
-                if ((spiral.material.uniforms as any).uScrollFade) {
-                  (spiral.material.uniforms as any).uScrollFade.value = 1.0;
-                }
-              }
-            },
-            onLeaveBack: () => {
-              // Reset to initial state when scrolling back above the trigger
-              if (english) {
-                english.scale.setScalar(1);
-                english.rotation.set(0, 0, 0);
-                english.position.set(
-                  textControls.posX,
-                  textControls.posY,
-                  textControls.posZ
-                );
-              }
-              if (farsi) {
-                farsi.scale.setScalar(1);
-                farsi.rotation.set(0, 0, 0);
-              }
-              if (textGroupRef.current) {
-                textGroupRef.current.scale.setScalar(1);
-              }
-              // Reset portals to scale 0 and spiral holes to 0 at initial state
-              leftPortalGroup.scale.setScalar(0);
-              rightPortalGroup.scale.setScalar(0);
-              if (spiral?.material?.uniforms) {
-                const spiralHole = spiral.material.uniforms.uHoleRadius
-                  ?.value as THREE.Vector2;
-                const spiralOuter = spiral.material.uniforms.uHoleRadiusOuter
-                  ?.value as THREE.Vector2;
-                if (spiralHole && spiralOuter) {
-                  spiralHole.set(0, 0);
-                  spiralOuter.set(0, 0);
-                }
-                if ((spiral.material.uniforms as any).uScrollFade) {
-                  (spiral.material.uniforms as any).uScrollFade.value = 1.0;
-                }
-              }
-            },
+            onEnter: resetScrollTriggerState,
+            onLeaveBack: resetScrollTriggerState,
             onUpdate: (self) => {
               const progress = Math.max(0, Math.min(1, self.progress)); // Clamp progress between 0 and 1
 
               // Force complete reset when at the very beginning
               if (progress === 0 || progress < 0.001) {
-                if (english) {
-                  english.scale.setScalar(1);
-                  english.rotation.set(0, 0, 0);
-                  english.position.set(
-                    textControls.posX,
-                    textControls.posY,
-                    textControls.posZ
-                  );
-                }
-                if (farsi) {
-                  farsi.scale.setScalar(1);
-                  farsi.rotation.set(0, 0, 0);
-                }
-                if (textGroupRef.current) {
-                  textGroupRef.current.scale.setScalar(1);
-                }
-                // Reset portals to scale 0 and spiral holes to 0 at initial state
-                leftPortalGroup.scale.setScalar(0);
-                rightPortalGroup.scale.setScalar(0);
-                // Reset spiral hole radius to 0 (spiral mesh should always be visible at scale 1)
-                if (spiral?.material?.uniforms) {
-                  const spiralHole = spiral.material.uniforms.uHoleRadius
-                    ?.value as THREE.Vector2;
-                  const spiralOuter = spiral.material.uniforms.uHoleRadiusOuter
-                    ?.value as THREE.Vector2;
-                  if (spiralHole && spiralOuter) {
-                    spiralHole.set(0, 0);
-                    spiralOuter.set(0, 0);
-                  }
-                  // Reset gradient fade
-                  if ((spiral.material.uniforms as any).uScrollFade) {
-                    (spiral.material.uniforms as any).uScrollFade.value = 1.0;
-                  }
-                }
+                resetScrollTriggerState();
                 return; // Early return to avoid unnecessary calculations
               }
 
