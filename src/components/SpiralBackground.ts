@@ -505,6 +505,18 @@ export function createSpiralBackground(
   let isScrolling = false;
   let restartTimeOffset = 0.0; // Time offset to reset animation when restarting
   let hasStartedRestartAnimation = false; // Flag to prevent resetting restartTimeOffset every frame
+  let isAtBottom = false; // Track if user is at the bottom of the page
+
+  // Helper function to check if user is at the bottom of the page
+  function checkIfAtBottom(): boolean {
+    if (typeof window === "undefined") return false;
+    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+    const scrollHeight = document.documentElement.scrollHeight;
+    const clientHeight = window.innerHeight;
+    // Consider at bottom if within 50px of the bottom
+    const threshold = 50;
+    return scrollTop + clientHeight >= scrollHeight - threshold;
+  }
 
   function update(timeSec: number) {
     uniforms.uTime.value = timeSec;
@@ -521,8 +533,11 @@ export function createSpiralBackground(
     if (restartTimeOffset > 0.0) {
       // Ensure restart stays at 1.0 to keep animation active
       uniforms.uArrowAnimationRestart.value = 1.0;
-      // Ensure visibility stays at 1.0 to keep animation visible
-      uniforms.uArrowAnimationVisible.value = 1.0;
+      // Only ensure visibility stays at 1.0 if we're not scrolling
+      // Since restartTimeOffset is reset to 0 on scroll, this check prevents resetting during fade-out
+      if (!isScrolling && uniforms.uArrowAnimationVisible.value > 0.01) {
+        uniforms.uArrowAnimationVisible.value = 1.0;
+      }
       // Calculate restart time: current time minus offset, so it starts from 0
       // This ensures restartOffset continuously increases from 0.0 to 1.0, then wraps to 0.0
       // The direction is always forward (increasing) because timeSec always increases
@@ -534,8 +549,36 @@ export function createSpiralBackground(
       uniforms.uArrowRestartTime.value = Math.max(0.0, calculatedRestartTime);
     }
 
-    // If 5 seconds have passed since page load and no scroll in last 5 seconds, show and start restart animation
-    if (timeSinceLoad >= 5.0 && timeSinceScroll >= 5.0 && !isScrolling) {
+    // Check if user is at the bottom of the page
+    isAtBottom = checkIfAtBottom();
+
+    // If at bottom, hide arrow immediately and don't allow it to show
+    if (isAtBottom) {
+      // Immediately stop the animation loop
+      restartTimeOffset = 0.0;
+      hasStartedRestartAnimation = false;
+      
+      // Fade out arrow if visible
+      if (uniforms.uArrowAnimationVisible.value > 0.01) {
+        if (arrowVisibilityTween && arrowVisibilityTween.isActive()) {
+          arrowVisibilityTween.kill();
+        }
+        arrowVisibilityTween = gsap.to(uniforms.uArrowAnimationVisible, {
+          value: 0.0,
+          duration: 0.5,
+          ease: "power1.out",
+        });
+      }
+      
+      // Stop restart animation
+      if (arrowRestartTween && arrowRestartTween.isActive()) {
+        arrowRestartTween.kill();
+      }
+      uniforms.uArrowAnimationRestart.value = 0.0;
+    }
+    // If 5 seconds have passed since page load and no scroll in last 5 seconds, 
+    // and we're NOT at the bottom, show and start restart animation
+    else if (timeSinceLoad >= 5.0 && timeSinceScroll >= 5.0 && !isScrolling) {
       // Fade in visibility if not already visible
       if (uniforms.uArrowAnimationVisible.value < 0.99) {
         if (arrowVisibilityTween === null || !arrowVisibilityTween.isActive()) {
@@ -587,37 +630,57 @@ export function createSpiralBackground(
     lastScrollTime = Date.now();
     isScrolling = true;
 
-    // Fade out visibility smoothly when user scrolls (do this first for smooth transition)
-    if (arrowVisibilityTween && arrowVisibilityTween.isActive()) {
-      arrowVisibilityTween.kill();
-    }
-    gsap.to(uniforms.uArrowAnimationVisible, {
-      value: 0.0,
-      duration: 0.8,
-      ease: "power2.inOut",
-    });
+    // Check if we're at the bottom
+    isAtBottom = checkIfAtBottom();
 
-    // Stop restart animation smoothly after a slight delay to allow visibility to fade
-    if (arrowRestartTween && arrowRestartTween.isActive()) {
-      arrowRestartTween.kill();
+    // Immediately stop the animation loop to prevent update() from resetting visibility
+    restartTimeOffset = 0.0;
+    hasStartedRestartAnimation = false;
+
+    // If at bottom, hide arrow immediately (don't wait for fade)
+    if (isAtBottom) {
+      if (arrowVisibilityTween && arrowVisibilityTween.isActive()) {
+        arrowVisibilityTween.kill();
+      }
+      uniforms.uArrowAnimationVisible.value = 0.0;
+      
+      if (arrowRestartTween && arrowRestartTween.isActive()) {
+        arrowRestartTween.kill();
+      }
+      uniforms.uArrowAnimationRestart.value = 0.0;
+      uniforms.uArrowRestartStartOffset.value = 0.0;
+      uniforms.uArrowRestartHasStarted.value = 0.0;
+    } else {
+      // Fade out visibility smoothly when user scrolls (do this first for smooth transition)
+      if (arrowVisibilityTween && arrowVisibilityTween.isActive()) {
+        arrowVisibilityTween.kill();
+      }
+      arrowVisibilityTween = gsap.to(uniforms.uArrowAnimationVisible, {
+        value: 0.0,
+        duration: 1.2,
+        ease: "power1.out",
+      });
+
+      // Stop restart animation smoothly after a slight delay to allow visibility to fade
+      if (arrowRestartTween && arrowRestartTween.isActive()) {
+        arrowRestartTween.kill();
+      }
+      arrowRestartTween = gsap.to(uniforms.uArrowAnimationRestart, {
+        value: 0.0,
+        duration: 1.0,
+        ease: "power1.out",
+        onComplete: () => {
+          // Reset restart time offset, start offset, has started flag, and animation flag when animation stops
+          uniforms.uArrowRestartStartOffset.value = 0.0;
+          uniforms.uArrowRestartHasStarted.value = 0.0;
+        },
+      });
     }
-    gsap.to(uniforms.uArrowAnimationRestart, {
-      value: 0.0,
-      duration: 0.8,
-      ease: "power2.inOut",
-      onComplete: () => {
-        // Reset restart time offset, start offset, has started flag, and animation flag when animation stops
-        restartTimeOffset = 0.0;
-        uniforms.uArrowRestartStartOffset.value = 0.0;
-        uniforms.uArrowRestartHasStarted.value = 0.0;
-        hasStartedRestartAnimation = false; // Reset flag so animation can start again
-      },
-    });
 
     // Reset scrolling flag after a delay
     setTimeout(() => {
       isScrolling = false;
-    }, 100);
+    }, 1500); // Longer delay to ensure fade-out completes
   }
 
   // Add scroll listener
