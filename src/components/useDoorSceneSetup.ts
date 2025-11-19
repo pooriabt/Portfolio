@@ -244,6 +244,16 @@ export function useDoorSceneSetup({
     // Create wavy text elements for navigation (home, about, contacts, resume)
     const wavyTexts: THREE.Mesh[] = [];
     const textLabels = ["home", "about", "contacts", "resume"];
+
+    // Column text elements for left and right columns
+    const columnTexts: THREE.Mesh[] = [];
+    const leftColumnText =
+      "Design Works Architecture, jewelry, and industrial works created through precise 3D modeling, prepared for visualization, 3D printing, and CNC fabrication.";
+    const rightColumnText =
+      "Development\n\nPython and JavaScript–based solutions integrating machine learning, image processing, and modern development frameworks including React, React Native, and Next.js.";
+
+    // Store font for text wrapping in updateSizing
+    let columnTextFont: any = null;
     // Base values for full-screen (will be used in updateSizing)
     const baseTextSize = 0.5; // Full-screen text size
     const baseTextPositions = [
@@ -260,6 +270,8 @@ export function useDoorSceneSetup({
         loader.load(
           "/assets/fonts/montserrat black_regular.json",
           (font) => {
+            // Store font for text wrapping
+            columnTextFont = font;
             if (spiral?.material?.uniforms) {
               const spiralUniforms = spiral.material.uniforms;
               textLabels.forEach((label, index) => {
@@ -375,6 +387,63 @@ export function useDoorSceneSetup({
                 sceneRoot.add(textMesh);
                 wavyTexts.push(textMesh);
               });
+
+              // Create column text meshes
+              const leftTextMesh = createWavyText({
+                text: leftColumnText,
+                font: font,
+                position: { x: 0, y: -2, z: -8 }, // Will be positioned in updateSizing
+                size: 1.08, // Smaller size for body text (will be adjusted in updateSizing)
+                color: "#ffffff",
+                spiralUniforms: {
+                  uTime: spiralUniforms.uTime as { value: number },
+                  uResolution: spiralUniforms.uResolution as {
+                    value: THREE.Vector2;
+                  },
+                  uCenter0: spiralUniforms.uCenter0 as {
+                    value: THREE.Vector2;
+                  },
+                  uCenter1: spiralUniforms.uCenter1 as {
+                    value: THREE.Vector2;
+                  },
+                  uSpeed: spiralUniforms.uSpeed as { value: number },
+                  uBands: spiralUniforms.uBands as { value: number },
+                },
+              });
+
+              const rightTextMesh = createWavyText({
+                text: rightColumnText,
+                font: font,
+                position: { x: 0, y: -2, z: -8 }, // Will be positioned in updateSizing
+                size: 0.08, // Smaller size for body text (will be adjusted in updateSizing)
+                color: "#ffffff",
+                spiralUniforms: {
+                  uTime: spiralUniforms.uTime as { value: number },
+                  uResolution: spiralUniforms.uResolution as {
+                    value: THREE.Vector2;
+                  },
+                  uCenter0: spiralUniforms.uCenter0 as {
+                    value: THREE.Vector2;
+                  },
+                  uCenter1: spiralUniforms.uCenter1 as {
+                    value: THREE.Vector2;
+                  },
+                  uSpeed: spiralUniforms.uSpeed as { value: number },
+                  uBands: spiralUniforms.uBands as { value: number },
+                },
+              });
+
+              // Set initial scale to 0 to prevent rendering in center before updateSizing
+              leftTextMesh.scale.setScalar(0);
+              rightTextMesh.scale.setScalar(0);
+
+              // Store original text for wrapping
+              leftTextMesh.userData.originalText = leftColumnText;
+              rightTextMesh.userData.originalText = rightColumnText;
+
+              sceneRoot.add(leftTextMesh, rightTextMesh);
+              columnTexts.push(leftTextMesh, rightTextMesh);
+
               // Update positions and sizes after creation
               // updateSizing will be called after all fonts are loaded
             }
@@ -645,6 +714,64 @@ export function useDoorSceneSetup({
       }
     }
 
+    function wrapTextToFitWidth(
+      text: string,
+      font: any,
+      baseSize: number,
+      maxWidth: number
+    ): string {
+      // Split text into words (preserve existing line breaks)
+      const paragraphs = text.split(/\n/);
+      const wrappedLines: string[] = [];
+
+      for (const paragraph of paragraphs) {
+        if (!paragraph.trim()) {
+          wrappedLines.push(""); // Preserve empty lines
+          continue;
+        }
+
+        const words = paragraph.trim().split(/\s+/);
+        const lines: string[] = [];
+        let currentLine = "";
+
+        for (const word of words) {
+          // Test if adding this word would exceed the width
+          const testLine = currentLine ? `${currentLine} ${word}` : word;
+          const testGeometry = new TextGeometry(testLine, {
+            font: font,
+            size: baseSize,
+            depth: 0.02,
+            curveSegments: 12,
+            bevelEnabled: false,
+          });
+          testGeometry.computeBoundingBox();
+          const testWidth =
+            testGeometry.boundingBox!.max.x - testGeometry.boundingBox!.min.x;
+
+          // Dispose temporary geometry
+          testGeometry.dispose();
+
+          if (testWidth <= maxWidth || currentLine === "") {
+            // Fits or it's the first word (must add it even if too long)
+            currentLine = testLine;
+          } else {
+            // Doesn't fit, start new line
+            lines.push(currentLine);
+            currentLine = word;
+          }
+        }
+
+        // Add remaining line
+        if (currentLine) {
+          lines.push(currentLine);
+        }
+
+        wrappedLines.push(...lines);
+      }
+
+      return wrappedLines.join("\n");
+    }
+
     function updateSizing() {
       if (!mount) return;
       const newWidth = window.innerWidth || mount.clientWidth || 1;
@@ -737,6 +864,7 @@ export function useDoorSceneSetup({
       let portalHeightCss: number;
 
       if (isMobileViewport) {
+        // Keep current value for <600px: portalWidthCss = viewportWidthCss / 3
         const baseBlockWidth = viewportWidthCss;
         portalWidthCss = baseBlockWidth / 3;
         columnWidthCss = baseBlockWidth / 9;
@@ -745,29 +873,96 @@ export function useDoorSceneSetup({
           screenHeight / 2
         );
       } else if (aspectRatio <= 1) {
-        const baseBlockWidth = Math.min(viewportWidthCss, screenWidth / 2);
-        portalWidthCss = baseBlockWidth / 3;
+        // Portrait/square: implement transition between min (600px) and max widths
+        // Same transition logic as landscape mode
+        const minViewportWidth = 600;
+        const maxViewportWidth = 1920; // Reference width for maximum portal size
+
+        // Calculate portal widths at endpoints
+        const minPortalWidth = minViewportWidth / 3; // 200px at 600px (current <600px value)
+        const maxPortalWidth = maxViewportWidth / 2 / 3; // 320px at 1920px (current highest value)
+
+        let interpolatedPortalWidth: number;
+
+        if (viewportWidthCss <= maxViewportWidth) {
+          // Within transition range: interpolate between min and max
+          const clampedViewport = Math.max(minViewportWidth, viewportWidthCss);
+          const transitionFactor =
+            (clampedViewport - minViewportWidth) /
+            (maxViewportWidth - minViewportWidth);
+          interpolatedPortalWidth =
+            minPortalWidth +
+            (maxPortalWidth - minPortalWidth) * transitionFactor;
+        } else {
+          // Beyond max width: use current calculation (allows growth beyond reference)
+          const baseBlockWidthBeyond = Math.min(
+            viewportWidthCss,
+            screenWidth / 2
+          );
+          interpolatedPortalWidth = baseBlockWidthBeyond / 3;
+        }
+
+        // Calculate base block width from interpolated portal width
+        const baseBlockWidth = interpolatedPortalWidth * 3;
+
+        portalWidthCss = interpolatedPortalWidth;
         columnWidthCss = baseBlockWidth / 9;
         portalHeightCss = Math.min(viewportHeightCss / 2, screenHeight / 2);
       } else {
-        let baseline = squareBaselineRef.current;
-        if (!baseline) {
-          const fallbackBlock = Math.min(viewportWidthCss, screenWidth / 2);
-          const fallbackHeight = Math.min(
-            viewportHeightCss / 2,
-            screenHeight / 2
-          );
-          baseline = {
-            portalWidthCss: fallbackBlock / 3,
-            columnWidthCss: fallbackBlock / 9,
-            portalHeightCss: fallbackHeight,
-          };
-          squareBaselineRef.current = baseline;
-        }
-        portalWidthCss = baseline.portalWidthCss;
-        columnWidthCss = baseline.columnWidthCss;
-        portalHeightCss = baseline.portalHeightCss;
+        // Landscape mode: implement transition between min (600px) and max widths
+        // Current highest value: at large screens (e.g., 1920px), portal width = 1920/2/3 = 320px
+        // Current <600px value: portal width = 600/3 = 200px
 
+        // Fixed values for transition endpoints
+        const minViewportWidth = 600;
+        const maxViewportWidth = 1920; // Reference width for maximum portal size
+
+        // Calculate portal widths at endpoints
+        const minPortalWidth = minViewportWidth / 3; // 200px at 600px (current <600px value)
+
+        // Calculate the maximum portal width at 1920px
+        // This should be the value that results after all calculations and scaling
+        // At 1920px, using current highest value calculation: (1920/2)/3 = 320px
+        // But we need to account for scaling that happens after interpolation
+        // So we calculate what interpolated value would result in the desired final value
+
+        // At 1920px with current logic: baseBlock = 1920/2 = 960, portalWidth = 960/3 = 320
+        // After scaling check: if 320*2 + 106.67*2 + 136.67 > 1920, it gets scaled
+        // Checking: 640 + 213.33 + 136.67 = 990 < 1920, so no scaling needed
+        // So maxPortalWidth should be 320px
+        const maxPortalWidth = maxViewportWidth / 2 / 6; // 320px at 1920px (current highest value)
+
+        // Interpolate portal width based on viewport width
+        let interpolatedPortalWidth: number;
+
+        if (viewportWidthCss <= maxViewportWidth) {
+          // Within transition range: interpolate between min and max
+          // This interpolation should result in portals reaching maxPortalWidth at maxViewportWidth
+          const clampedViewport = Math.max(minViewportWidth, viewportWidthCss);
+          const transitionFactor =
+            (clampedViewport - minViewportWidth) /
+            (maxViewportWidth - minViewportWidth);
+          interpolatedPortalWidth =
+            minPortalWidth +
+            (maxPortalWidth - minPortalWidth) * transitionFactor;
+        } else {
+          // Beyond max width: use current calculation (allows growth beyond reference)
+          const baseBlockWidthBeyond = Math.min(
+            viewportWidthCss,
+            screenWidth / 2
+          );
+          interpolatedPortalWidth = baseBlockWidthBeyond / 3;
+        }
+
+        // Calculate base block width from interpolated portal width
+        const baseBlockWidth = interpolatedPortalWidth * 3;
+
+        portalWidthCss = interpolatedPortalWidth;
+        columnWidthCss = baseBlockWidth / 9;
+        portalHeightCss = Math.min(viewportHeightCss / 2, screenHeight / 2);
+
+        // Apply scaling if needed (this happens after interpolation)
+        // The scaling will reduce portal size if total width exceeds viewport
         const baselineMiddleColumnCss = columnWidthCss + middleColumnExtraCss;
         const requiredWidthBaseline =
           portalWidthCss * 2 + columnWidthCss * 2 + baselineMiddleColumnCss;
@@ -776,6 +971,30 @@ export function useDoorSceneSetup({
           portalWidthCss *= scale;
           columnWidthCss *= scale;
           middleColumnExtraCss *= scale;
+        }
+
+        // Ensure portals reach maxPortalWidth at maxViewportWidth
+        // At 1920px, interpolatedPortalWidth should be 320px and it should fit (990px < 1920px)
+        // If we're at or near maxViewportWidth and portals are below target, adjust
+        if (
+          viewportWidthCss >= maxViewportWidth * 0.98 &&
+          viewportWidthCss <= maxViewportWidth * 1.02
+        ) {
+          // Very close to maxViewportWidth - ensure we reach the target
+          const requiredWidthAtTarget =
+            maxPortalWidth * 2 +
+            ((maxPortalWidth * 3) / 9) * 2 +
+            ((maxPortalWidth * 3) / 9 + middleColumnExtraCss);
+
+          // Only adjust if target fits and current is below target
+          if (
+            requiredWidthAtTarget <= viewportWidthCss &&
+            portalWidthCss < maxPortalWidth * 0.98
+          ) {
+            portalWidthCss = maxPortalWidth;
+            const targetBaseBlockWidth = maxPortalWidth * 3;
+            columnWidthCss = targetBaseBlockWidth / 9;
+          }
         }
       }
 
@@ -1032,6 +1251,273 @@ export function useDoorSceneSetup({
         });
       }
 
+      // Update column text positions and sizes
+      // Text goes in Left Outer Column (red) and Right Outer Column (blue)
+      if (columnTexts.length >= 2) {
+        const leftTextMesh = columnTexts[0];
+        const rightTextMesh = columnTexts[1];
+
+        // Layout: [Left Outer][Left Portal][Middle][Right Portal][Right Outer]
+        // Left text goes in Left Outer Column (red)
+        // Right text goes in Right Outer Column (blue)
+
+        // Position text beside portals (at portal Y level)
+        const textZ = -8;
+
+        // Calculate frustum for text position (at textZ depth) - MUST match text position calculation
+        const textDistance = Math.abs(camera.position.z - textZ);
+        const textVfov = (camera.fov * Math.PI) / 180;
+        const frustumHeightAtText = 2 * textDistance * Math.tan(textVfov / 2);
+        const frustumWidthAtText = frustumHeightAtText * camera.aspect;
+
+        // Convert column boundaries from CSS to world space using text frustum
+        const toWorldText = (css: number) =>
+          (css / viewportWidthCss - 0.5) * frustumWidthAtText;
+
+        // Get visible frustum boundaries in world space at text depth
+        const frustumLeftEdgeWorldText = -frustumWidthAtText / 2;
+        const frustumRightEdgeWorldText = frustumWidthAtText / 2;
+
+        // Calculate column boundaries in CSS
+        // Layout: [Left Outer][Left Portal][Middle][Right Portal][Right Outer]
+        const leftOuterLeftCss = 0;
+        const leftOuterRightCss = outerFillerCss + leftColumnCss;
+        const leftPortalLeftCss = leftOuterRightCss;
+        const leftPortalRightCss = leftPortalLeftCss + portalWidthCss;
+        const middleLeftCss = leftPortalRightCss;
+        const middleRightCss = middleLeftCss + middleColumnCss;
+        const rightPortalLeftCss = middleRightCss;
+        const rightPortalRightCss = rightPortalLeftCss + portalWidthCss;
+        const rightOuterLeftCss = rightPortalRightCss;
+        const rightOuterRightCss = viewportWidthCss;
+
+        // Get column boundaries in world space at text depth, clamped to visible frustum
+        const leftOuterLeftWorldText = Math.max(
+          toWorldText(leftOuterLeftCss),
+          frustumLeftEdgeWorldText
+        );
+        const leftOuterRightWorldText = Math.min(
+          toWorldText(leftOuterRightCss),
+          frustumRightEdgeWorldText
+        );
+        const rightOuterLeftWorldText = Math.max(
+          toWorldText(rightOuterLeftCss),
+          frustumLeftEdgeWorldText
+        );
+        const rightOuterRightWorldText = Math.min(
+          toWorldText(rightOuterRightCss),
+          frustumRightEdgeWorldText
+        );
+
+        // Calculate actual column widths in world space at text depth
+        const leftOuterWidthWorldText =
+          leftOuterRightWorldText - leftOuterLeftWorldText;
+        const rightOuterWidthWorldText =
+          rightOuterRightWorldText - rightOuterLeftWorldText;
+
+        const textY = -portalHeightWorld / 2 - 0.3; // Slightly below portal bottom
+
+        // Determine text size based on screen width
+        let columnTextSize: number;
+        if (viewportWidthCss >= 900) {
+          columnTextSize = 0.2;
+        } else if (viewportWidthCss > 700 && viewportWidthCss < 900) {
+          columnTextSize = 0.175;
+        } else {
+          columnTextSize = 0.0;
+        }
+
+        // Padding from column edges (10% on each side = 20% total padding)
+        // Add extra margin for shader distortion effects
+        const paddingRatio = 0.1;
+        const distortionMargin = 0.05; // Extra margin for wavy text distortion
+        const effectivePaddingRatio = paddingRatio + distortionMargin;
+
+        // Calculate available width for text wrapping
+        const leftMaxAllowedWidthForWrap =
+          leftOuterWidthWorldText * (1 - 2 * effectivePaddingRatio);
+        const rightMaxAllowedWidthForWrap =
+          rightOuterWidthWorldText * (1 - 2 * effectivePaddingRatio);
+
+        // Wrap text if font is loaded
+        if (columnTextFont) {
+          // Get original text
+          const leftOriginalText =
+            leftTextMesh.userData.originalText || leftColumnText;
+          const rightOriginalText =
+            rightTextMesh.userData.originalText || rightColumnText;
+
+          // Wrap text based on available width
+          const leftWrappedText = wrapTextToFitWidth(
+            leftOriginalText,
+            columnTextFont,
+            columnTextSize,
+            leftMaxAllowedWidthForWrap
+          );
+          const rightWrappedText = wrapTextToFitWidth(
+            rightOriginalText,
+            columnTextFont,
+            columnTextSize,
+            rightMaxAllowedWidthForWrap
+          );
+
+          // Store current text to check if we need to recreate geometry
+          const leftCurrentText = leftTextMesh.userData.currentWrappedText;
+          const rightCurrentText = rightTextMesh.userData.currentWrappedText;
+
+          // Recreate geometry if text changed
+          if (leftCurrentText !== leftWrappedText) {
+            leftTextMesh.geometry.dispose();
+            const newGeometry = new TextGeometry(leftWrappedText, {
+              font: columnTextFont,
+              size: columnTextSize,
+              depth: 0.02,
+              curveSegments: 12,
+              bevelEnabled: false,
+            });
+            newGeometry.computeBoundingBox();
+            const centerOffset =
+              newGeometry.boundingBox!.max.x - newGeometry.boundingBox!.min.x;
+            newGeometry.translate(-centerOffset / 2, 0, 0);
+            leftTextMesh.geometry = newGeometry;
+            leftTextMesh.userData.currentWrappedText = leftWrappedText;
+          }
+
+          if (rightCurrentText !== rightWrappedText) {
+            rightTextMesh.geometry.dispose();
+            const newGeometry = new TextGeometry(rightWrappedText, {
+              font: columnTextFont,
+              size: columnTextSize,
+              depth: 0.02,
+              curveSegments: 12,
+              bevelEnabled: false,
+            });
+            newGeometry.computeBoundingBox();
+            const centerOffset =
+              newGeometry.boundingBox!.max.x - newGeometry.boundingBox!.min.x;
+            newGeometry.translate(-centerOffset / 2, 0, 0);
+            rightTextMesh.geometry = newGeometry;
+            rightTextMesh.userData.currentWrappedText = rightWrappedText;
+          }
+        }
+
+        // Get text geometry bounding boxes
+        if (!leftTextMesh.geometry.boundingBox) {
+          leftTextMesh.geometry.computeBoundingBox();
+        }
+        if (!rightTextMesh.geometry.boundingBox) {
+          rightTextMesh.geometry.computeBoundingBox();
+        }
+
+        const leftTextBaseWidth =
+          leftTextMesh.geometry.boundingBox!.max.x -
+          leftTextMesh.geometry.boundingBox!.min.x;
+        const rightTextBaseWidth =
+          rightTextMesh.geometry.boundingBox!.max.x -
+          rightTextMesh.geometry.boundingBox!.min.x;
+
+        const leftMaxAllowedWidth =
+          leftOuterWidthWorldText * (1 - 2 * effectivePaddingRatio);
+        const rightMaxAllowedWidth =
+          rightOuterWidthWorldText * (1 - 2 * effectivePaddingRatio);
+
+        // Calculate scale: ensure text fits within column boundaries
+        // Geometry is already created at columnTextSize, so base width is already correct
+        // Only scale down if text still doesn't fit after wrapping
+        const leftTextScale = Math.min(
+          1.0, // Geometry is already at columnTextSize, no scaling needed
+          leftMaxAllowedWidth / Math.max(leftTextBaseWidth, 1e-6) // Width constraint - scale down if needed
+        );
+        const rightTextScale = Math.min(
+          1.0, // Geometry is already at columnTextSize, no scaling needed
+          rightMaxAllowedWidth / Math.max(rightTextBaseWidth, 1e-6) // Width constraint - scale down if needed
+        );
+
+        // Calculate actual text width after scaling (base width only)
+        const leftTextActualWidth = leftTextBaseWidth * leftTextScale;
+        const rightTextActualWidth = rightTextBaseWidth * rightTextScale;
+
+        // Position texts with proper alignment within columns
+
+        // Calculate safe text boundaries within each column
+        // Left text must stay strictly within left outer column: [leftOuterLeftWorldText, leftOuterRightWorldText]
+        const leftTextMinX = Math.max(
+          leftOuterLeftWorldText +
+            effectivePaddingRatio * leftOuterWidthWorldText,
+          frustumLeftEdgeWorldText
+        );
+        const leftTextMaxX = Math.min(
+          leftOuterRightWorldText -
+            effectivePaddingRatio * leftOuterWidthWorldText,
+          frustumRightEdgeWorldText
+        );
+
+        // Right text must stay strictly within right outer column: [rightOuterLeftWorldText, rightOuterRightWorldText]
+        const rightTextMinX = Math.max(
+          rightOuterLeftWorldText +
+            effectivePaddingRatio * rightOuterWidthWorldText,
+          frustumLeftEdgeWorldText
+        );
+        const rightTextMaxX = Math.min(
+          rightOuterRightWorldText -
+            effectivePaddingRatio * rightOuterWidthWorldText,
+          frustumRightEdgeWorldText
+        );
+
+        // Ensure text fits within available space
+        const leftTextAvailableWidth = leftTextMaxX - leftTextMinX;
+        const rightTextAvailableWidth = rightTextMaxX - rightTextMinX;
+
+        // If text doesn't fit, reduce scale further
+        let finalLeftTextScale = leftTextScale;
+        let finalRightTextScale = rightTextScale;
+
+        if (leftTextActualWidth > leftTextAvailableWidth) {
+          finalLeftTextScale = leftTextAvailableWidth / leftTextBaseWidth;
+        }
+        if (rightTextActualWidth > rightTextAvailableWidth) {
+          finalRightTextScale = rightTextAvailableWidth / rightTextBaseWidth;
+        }
+
+        // Recalculate actual widths with final scale
+        const finalLeftTextWidth = leftTextBaseWidth * finalLeftTextScale;
+        const finalRightTextWidth = rightTextBaseWidth * finalRightTextScale;
+
+        // Position left text: left-aligned within left outer column
+        let leftTextX = leftTextMinX + finalLeftTextWidth / 2;
+        // Ensure right edge doesn't exceed column boundary
+        const leftTextRightEdge = leftTextX + finalLeftTextWidth / 2;
+        if (leftTextRightEdge > leftTextMaxX) {
+          leftTextX = leftTextMaxX - finalLeftTextWidth / 2;
+        }
+        // Ensure left edge doesn't go below minimum
+        const leftTextLeftEdge = leftTextX - finalLeftTextWidth / 2;
+        if (leftTextLeftEdge < leftTextMinX) {
+          leftTextX = leftTextMinX + finalLeftTextWidth / 2;
+        }
+
+        // Position right text: right-aligned within right outer column
+        let rightTextX = rightTextMaxX - finalRightTextWidth / 2;
+        // Ensure left edge doesn't exceed column boundary
+        const rightTextLeftEdge = rightTextX - finalRightTextWidth / 2;
+        if (rightTextLeftEdge < rightTextMinX) {
+          rightTextX = rightTextMinX + finalRightTextWidth / 2;
+        }
+        // Ensure right edge doesn't go above maximum
+        const rightTextRightEdge = rightTextX + finalRightTextWidth / 2;
+        if (rightTextRightEdge > rightTextMaxX) {
+          rightTextX = rightTextMaxX - finalRightTextWidth / 2;
+        }
+
+        // Update left column text - left-aligned within red column
+        leftTextMesh.position.set(leftTextX, textY, textZ);
+        leftTextMesh.scale.setScalar(finalLeftTextScale);
+
+        // Update right column text - right-aligned within blue column
+        rightTextMesh.position.set(rightTextX, textY, textZ);
+        rightTextMesh.scale.setScalar(finalRightTextScale);
+      }
+
       projectObjectToScreenUv(
         leftPortalGroup,
         camera,
@@ -1098,6 +1584,38 @@ export function useDoorSceneSetup({
               (uniforms.uResolution.value as THREE.Vector2).copy(
                 spiralUniforms.uResolution.value as THREE.Vector2
               );
+            }
+          }
+        }
+      });
+
+      // Update column text uniforms to sync with spiral
+      columnTexts.forEach((textMesh) => {
+        if (textMesh.material instanceof THREE.ShaderMaterial) {
+          const uniforms = textMesh.material.uniforms;
+          if (uniforms.uTime) uniforms.uTime.value = elapsed;
+          if (spiral?.material?.uniforms) {
+            const spiralUniforms = spiral.material.uniforms;
+            if (uniforms.uCenter0 && spiralUniforms.uCenter0) {
+              (uniforms.uCenter0.value as THREE.Vector2).copy(
+                spiralUniforms.uCenter0.value as THREE.Vector2
+              );
+            }
+            if (uniforms.uCenter1 && spiralUniforms.uCenter1) {
+              (uniforms.uCenter1.value as THREE.Vector2).copy(
+                spiralUniforms.uCenter1.value as THREE.Vector2
+              );
+            }
+            if (uniforms.uResolution && spiralUniforms.uResolution) {
+              (uniforms.uResolution.value as THREE.Vector2).copy(
+                spiralUniforms.uResolution.value as THREE.Vector2
+              );
+            }
+            if (uniforms.uSpeed && spiralUniforms.uSpeed) {
+              uniforms.uSpeed.value = spiralUniforms.uSpeed.value;
+            }
+            if (uniforms.uBands && spiralUniforms.uBands) {
+              uniforms.uBands.value = spiralUniforms.uBands.value;
             }
           }
         }
@@ -1253,8 +1771,8 @@ export function useDoorSceneSetup({
         console.error("Error loading texts", err);
       })
       .finally(() => {
-        // Update wavy text positions and sizes after all fonts are loaded
-        if (wavyTexts.length > 0) {
+        // Update wavy text and column text positions and sizes after all fonts are loaded
+        if (wavyTexts.length > 0 || columnTexts.length > 0) {
           updateSizing();
         }
         textScrollTriggersRef.current.forEach((trigger) => trigger.kill());
@@ -1507,6 +2025,13 @@ export function useDoorSceneSetup({
       };
       disposeMesh(farsiMesh);
       disposeMesh(englishMesh);
+      // Dispose column texts
+      columnTexts.forEach((textMesh) => {
+        if (textMesh.geometry) textMesh.geometry.dispose();
+        if (textMesh.material instanceof THREE.Material)
+          textMesh.material.dispose();
+      });
+      columnTexts.length = 0;
       renderer.dispose();
       if (spiral) spiral.dispose();
       scene.remove(sceneRoot);
