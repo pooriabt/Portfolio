@@ -248,9 +248,9 @@ export function useDoorSceneSetup({
     // Column text elements for left and right columns
     const columnTexts: THREE.Mesh[] = [];
     const leftColumnText =
-      "Design Works Architecture, jewelry, and industrial works created through precise 3D modeling, prepared for visualization, 3D printing, and CNC fabrication.";
+      "Design Works\nArchitecture, jewelry, and industrial works created through precise 3D modeling, prepared for visualization, 3D printing, and CNC fabrication.";
     const rightColumnText =
-      "Development\n\nPython and JavaScript–based solutions integrating machine learning, image processing, and modern development frameworks including React, React Native, and Next.js.";
+      "Development\nPython and JavaScript–based solutions integrating machine learning, image processing, and frameworks including React, React Native, and Next.js.";
 
     // Store font for text wrapping in updateSizing
     let columnTextFont: any = null;
@@ -770,6 +770,756 @@ export function useDoorSceneSetup({
       }
 
       return wrappedLines.join("\n");
+    }
+
+    function createJustifiedTextGeometry(
+      text: string,
+      font: any,
+      baseSize: number,
+      maxWidth: number,
+      lineHeight: number,
+      firstLineFontSizeOverride?: number
+    ): { geometry: THREE.BufferGeometry; firstLineFontSize: number } {
+      // Constant: maximum space each word can get for justification (as multiplier of normal space)
+      const MAX_SPACE_PER_WORD_MULTIPLIER = 2.5;
+      const lines = text.split("\n");
+      const geometries: THREE.BufferGeometry[] = [];
+      let currentY = 0;
+      let actualFirstLineFontSize = baseSize;
+      let firstNonEmptyLineIndex = -1; // Track the first non-empty line
+      let overrideApplied = false; // Track if override was applied
+
+      for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+        const line = lines[lineIndex].trim();
+        if (!line) {
+          currentY -= lineHeight;
+          continue;
+        }
+
+        // Track first non-empty line
+        if (firstNonEmptyLineIndex === -1) {
+          firstNonEmptyLineIndex = lineIndex;
+        }
+
+        const words = line.split(/\s+/);
+        if (words.length === 0) {
+          currentY -= lineHeight;
+          continue;
+        }
+
+        // Validate font before processing
+        if (!font) {
+          console.warn("Font is not available, skipping line");
+          currentY -= lineHeight;
+          continue;
+        }
+
+        // Validate baseSize
+        if (isNaN(baseSize) || baseSize <= 0) {
+          console.warn(`Invalid baseSize: ${baseSize}, using fallback`);
+          baseSize = 0.2; // Fallback
+        }
+
+        // Check if this is the first non-empty line
+        const isFirstLine = lineIndex === firstNonEmptyLineIndex;
+        console.log(
+          `Processing line ${lineIndex}: isFirstLine=${isFirstLine}, firstNonEmptyLineIndex=${firstNonEmptyLineIndex}, words.length=${words.length}, override=${firstLineFontSizeOverride}`
+        );
+
+        // Justify the line
+        if (words.length === 1) {
+          // Single word - just left-align it
+          const word = words[0].trim();
+          if (!word) {
+            currentY -= lineHeight;
+            continue;
+          }
+
+          // Use override font size if this is the first line
+          let fontSizeToUse = baseSize;
+
+          if (
+            isFirstLine &&
+            firstLineFontSizeOverride !== undefined &&
+            firstLineFontSizeOverride > 0
+          ) {
+            fontSizeToUse = firstLineFontSizeOverride;
+            actualFirstLineFontSize = fontSizeToUse;
+            overrideApplied = true;
+            console.log(
+              `Single word first line override applied: word="${word}", baseSize=${baseSize}, override=${firstLineFontSizeOverride}, fontSizeToUse=${fontSizeToUse}`
+            );
+          } else if (isFirstLine && !overrideApplied) {
+            actualFirstLineFontSize = fontSizeToUse;
+          }
+
+          try {
+            const wordGeometry = new TextGeometry(word, {
+              font: font,
+              size: fontSizeToUse,
+              depth: 0.02,
+              curveSegments: 12,
+              bevelEnabled: false,
+            });
+
+            // Validate geometry
+            if (
+              !wordGeometry ||
+              !wordGeometry.attributes ||
+              !wordGeometry.attributes.position
+            ) {
+              console.warn(`Invalid geometry for single word: "${word}"`);
+              wordGeometry.dispose();
+              currentY -= lineHeight;
+              continue;
+            }
+
+            wordGeometry.computeBoundingBox();
+
+            // Validate bounding box
+            if (wordGeometry.boundingBox) {
+              const minX = wordGeometry.boundingBox.min.x;
+              const maxX = wordGeometry.boundingBox.max.x;
+              if (isNaN(minX) || isNaN(maxX)) {
+                console.warn(`NaN values in bounding box for word: "${word}"`);
+                wordGeometry.dispose();
+                currentY -= lineHeight;
+                continue;
+              }
+            }
+
+            wordGeometry.translate(0, currentY, 0);
+            geometries.push(wordGeometry);
+          } catch (error) {
+            console.warn(
+              `Error creating geometry for single word "${word}":`,
+              error
+            );
+            currentY -= lineHeight;
+            continue;
+          }
+        } else {
+          // Multiple words - justify by spacing and font scaling
+          const isLastLine = lineIndex === lines.length - 1;
+
+          // Step 1: Calculate normal space width
+          let normalSpaceWidth = 0;
+          try {
+            const spaceGeom = new TextGeometry(" ", {
+              font: font,
+              size: baseSize,
+              depth: 0.02,
+              curveSegments: 12,
+              bevelEnabled: false,
+            });
+
+            // Validate space geometry
+            if (
+              spaceGeom &&
+              spaceGeom.attributes &&
+              spaceGeom.attributes.position
+            ) {
+              spaceGeom.computeBoundingBox();
+              if (spaceGeom.boundingBox) {
+                const minX = spaceGeom.boundingBox.min.x;
+                const maxX = spaceGeom.boundingBox.max.x;
+                if (!isNaN(minX) && !isNaN(maxX)) {
+                  normalSpaceWidth = maxX - minX;
+                }
+              }
+            }
+
+            if (isNaN(normalSpaceWidth) || normalSpaceWidth <= 0) {
+              normalSpaceWidth = baseSize * 0.3;
+            }
+            spaceGeom.dispose();
+          } catch (error) {
+            console.warn("Error creating space geometry:", error);
+            normalSpaceWidth = baseSize * 0.3;
+          }
+
+          // Step 2: Calculate maximum allowed space between words using constant
+          const maxAllowedSpaceBetweenWords =
+            normalSpaceWidth * MAX_SPACE_PER_WORD_MULTIPLIER;
+
+          // Step 3: Calculate total width of all words at base size
+          // Validate font and baseSize before creating geometries
+          if (!font) {
+            console.warn(
+              "Font is not available, skipping text geometry creation"
+            );
+            currentY -= lineHeight;
+            continue;
+          }
+
+          if (isNaN(baseSize) || baseSize <= 0) {
+            console.warn(`Invalid baseSize: ${baseSize}, using fallback`);
+            baseSize = 0.2; // Fallback
+          }
+
+          let totalWordWidth = 0;
+          const wordWidths: number[] = [];
+
+          for (const word of words) {
+            const trimmedWord = word.trim();
+            if (!trimmedWord) {
+              // Skip empty words
+              wordWidths.push(0);
+              continue;
+            }
+
+            try {
+              const wordGeom = new TextGeometry(trimmedWord, {
+                font: font,
+                size: baseSize,
+                depth: 0.02,
+                curveSegments: 12,
+                bevelEnabled: false,
+              });
+
+              // Validate geometry before computing bounding box
+              if (
+                !wordGeom ||
+                !wordGeom.attributes ||
+                !wordGeom.attributes.position
+              ) {
+                console.warn(`Invalid geometry for word: "${trimmedWord}"`);
+                wordGeom.dispose();
+                const fallbackWidth = baseSize * trimmedWord.length * 0.5;
+                wordWidths.push(fallbackWidth);
+                totalWordWidth += fallbackWidth;
+                continue;
+              }
+
+              wordGeom.computeBoundingBox();
+              let wordWidth = 0;
+              if (wordGeom.boundingBox) {
+                const minX = wordGeom.boundingBox.min.x;
+                const maxX = wordGeom.boundingBox.max.x;
+
+                // Validate bounding box values
+                if (!isNaN(minX) && !isNaN(maxX)) {
+                  wordWidth = maxX - minX;
+                }
+              }
+
+              if (isNaN(wordWidth) || wordWidth <= 0) {
+                wordWidth = baseSize * trimmedWord.length * 0.5;
+              }
+
+              wordWidths.push(wordWidth);
+              totalWordWidth += wordWidth;
+              wordGeom.dispose();
+            } catch (error) {
+              console.warn(
+                `Error creating geometry for word "${trimmedWord}":`,
+                error
+              );
+              // Use fallback width
+              const fallbackWidth = baseSize * trimmedWord.length * 0.5;
+              wordWidths.push(fallbackWidth);
+              totalWordWidth += fallbackWidth;
+            }
+          }
+
+          // Validate inputs
+          if (isNaN(totalWordWidth) || totalWordWidth < 0) {
+            totalWordWidth = 0;
+          }
+          if (isNaN(maxWidth) || maxWidth <= 0) {
+            maxWidth = totalWordWidth || baseSize * 10;
+          }
+
+          // Step 4: Start with normal space between words
+          const numSpaces = words.length - 1;
+          const totalWidthWithNormalSpacing =
+            totalWordWidth + numSpaces * normalSpaceWidth;
+          let remainingSpace = maxWidth - totalWidthWithNormalSpacing;
+
+          // Step 5: Distribute remaining space up to maximum limit
+          let spaceBetweenWords = normalSpaceWidth;
+          let finalFontSize = baseSize;
+
+          // isFirstLine is already defined above, use it here
+          console.log(
+            `Multiple words line ${lineIndex}: isFirstLine=${isFirstLine}, firstNonEmptyLineIndex=${firstNonEmptyLineIndex}, override=${firstLineFontSizeOverride}, overrideDefined=${
+              firstLineFontSizeOverride !== undefined
+            }, override>0=${
+              firstLineFontSizeOverride !== undefined &&
+              firstLineFontSizeOverride > 0
+            }`
+          );
+
+          if (
+            isFirstLine &&
+            firstLineFontSizeOverride !== undefined &&
+            firstLineFontSizeOverride > 0
+          ) {
+            // Use the provided font size for first line
+            finalFontSize = firstLineFontSizeOverride;
+            actualFirstLineFontSize = finalFontSize;
+            overrideApplied = true; // Mark that override was applied
+            console.log(
+              `First line override applied: baseSize=${baseSize}, override=${firstLineFontSizeOverride}, finalFontSize=${finalFontSize}, actualFirstLineFontSize=${actualFirstLineFontSize}`
+            );
+
+            // Recalculate word widths and normal space width at the override font size for accurate spacing
+            let overrideTotalWordWidth = 0;
+            for (let i = 0; i < words.length; i++) {
+              const trimmedWord = words[i].trim();
+              if (!trimmedWord) continue;
+
+              try {
+                const testGeom = new TextGeometry(trimmedWord, {
+                  font: font,
+                  size: finalFontSize,
+                  depth: 0.02,
+                  curveSegments: 12,
+                  bevelEnabled: false,
+                });
+                testGeom.computeBoundingBox();
+                if (testGeom.boundingBox) {
+                  const minX = testGeom.boundingBox.min.x;
+                  const maxX = testGeom.boundingBox.max.x;
+                  if (!isNaN(minX) && !isNaN(maxX)) {
+                    overrideTotalWordWidth += maxX - minX;
+                  }
+                }
+                testGeom.dispose();
+              } catch (error) {
+                // Use fallback
+                overrideTotalWordWidth +=
+                  finalFontSize * trimmedWord.length * 0.5;
+              }
+            }
+
+            // Recalculate normal space width at override font size
+            let overrideNormalSpaceWidth = normalSpaceWidth;
+            try {
+              const overrideSpaceGeom = new TextGeometry(" ", {
+                font: font,
+                size: finalFontSize,
+                depth: 0.02,
+                curveSegments: 12,
+                bevelEnabled: false,
+              });
+              overrideSpaceGeom.computeBoundingBox();
+              if (overrideSpaceGeom.boundingBox) {
+                const minX = overrideSpaceGeom.boundingBox.min.x;
+                const maxX = overrideSpaceGeom.boundingBox.max.x;
+                if (!isNaN(minX) && !isNaN(maxX)) {
+                  overrideNormalSpaceWidth = maxX - minX;
+                }
+              }
+              overrideSpaceGeom.dispose();
+            } catch (error) {
+              // Use scaled version of base normal space width
+              overrideNormalSpaceWidth =
+                normalSpaceWidth * (finalFontSize / baseSize);
+            }
+
+            // Recalculate max allowed space at override font size
+            const overrideMaxAllowedSpaceBetweenWords =
+              overrideNormalSpaceWidth * MAX_SPACE_PER_WORD_MULTIPLIER;
+
+            // Recalculate spacing with override font size widths
+            const overrideTotalWidthWithNormalSpacing =
+              overrideTotalWordWidth + numSpaces * overrideNormalSpaceWidth;
+            const overrideRemainingSpace =
+              maxWidth - overrideTotalWidthWithNormalSpacing;
+
+            if (numSpaces > 0 && overrideRemainingSpace > 0) {
+              const maxExtraSpacePerGap =
+                overrideMaxAllowedSpaceBetweenWords - overrideNormalSpaceWidth;
+              const maxTotalExtraSpace = numSpaces * maxExtraSpacePerGap;
+
+              if (overrideRemainingSpace <= maxTotalExtraSpace) {
+                const extraSpacePerGap = overrideRemainingSpace / numSpaces;
+                spaceBetweenWords = overrideNormalSpaceWidth + extraSpacePerGap;
+              } else {
+                spaceBetweenWords = overrideMaxAllowedSpaceBetweenWords;
+              }
+            } else {
+              // No remaining space, use normal spacing
+              spaceBetweenWords = overrideNormalSpaceWidth;
+            }
+          } else if (numSpaces > 0 && remainingSpace > 0) {
+            // Calculate how much extra space we can add per gap (up to max limit)
+            const maxExtraSpacePerGap =
+              maxAllowedSpaceBetweenWords - normalSpaceWidth;
+            const maxTotalExtraSpace = numSpaces * maxExtraSpacePerGap;
+
+            if (remainingSpace <= maxTotalExtraSpace) {
+              // Can fill with spacing alone - distribute remaining space evenly
+              const extraSpacePerGap = remainingSpace / numSpaces;
+              spaceBetweenWords = normalSpaceWidth + extraSpacePerGap;
+              remainingSpace = 0; // All space used
+            } else {
+              // Use maximum spacing, then scale font if not last line
+              spaceBetweenWords = maxAllowedSpaceBetweenWords;
+              remainingSpace = remainingSpace - maxTotalExtraSpace;
+
+              // If there's still remaining space and not last line, scale font
+              if (remainingSpace > 0.001 && !isLastLine) {
+                // Calculate font scale to fill remaining space
+                // Current total width with max spacing
+                const currentTotalWidth =
+                  totalWordWidth + numSpaces * maxAllowedSpaceBetweenWords;
+                // Target total width to fill remaining space
+                const targetTotalWidth = currentTotalWidth + remainingSpace;
+                // Scale factor: newWidth = oldWidth * scale
+                const scaleFactor = targetTotalWidth / currentTotalWidth;
+                finalFontSize = baseSize * scaleFactor;
+              } else if (isLastLine) {
+                // Last line: use max spacing, no scaling, no right justification
+                remainingSpace = 0; // Don't justify to right for last line
+              }
+            }
+
+            // Track first line font size if this is the first line
+            // But don't overwrite if override was already applied
+            if (isFirstLine && !overrideApplied) {
+              actualFirstLineFontSize = finalFontSize;
+            }
+          } else if (isFirstLine) {
+            // First line but no spacing needed - still track the font size
+            // But don't overwrite if override was already applied
+            if (!overrideApplied) {
+              actualFirstLineFontSize = finalFontSize;
+            }
+          }
+
+          // Step 6: Create word geometries with final font size
+          const finalWordGeometries: THREE.BufferGeometry[] = [];
+          const finalWordWidths: number[] = [];
+          let finalTotalWordWidth = 0;
+
+          // Validate font and font size before creating geometries
+          if (!font) {
+            console.warn(
+              "Font is not available, skipping text geometry creation"
+            );
+            continue;
+          }
+
+          // Validate finalFontSize
+          if (isNaN(finalFontSize) || finalFontSize <= 0) {
+            console.warn(`Invalid font size: ${finalFontSize}, using baseSize`);
+            finalFontSize = baseSize;
+          }
+
+          for (let i = 0; i < words.length; i++) {
+            const word = words[i].trim();
+            if (!word) {
+              // Skip empty words
+              continue;
+            }
+
+            try {
+              const wordGeom = new TextGeometry(word, {
+                font: font,
+                size: finalFontSize,
+                depth: 0.02,
+                curveSegments: 12,
+                bevelEnabled: false,
+              });
+
+              // Validate geometry before computing bounding box
+              if (
+                !wordGeom ||
+                !wordGeom.attributes ||
+                !wordGeom.attributes.position
+              ) {
+                console.warn(`Invalid geometry for word: "${word}"`);
+                wordGeom.dispose();
+                continue;
+              }
+
+              wordGeom.computeBoundingBox();
+
+              let wordWidth = 0;
+              if (wordGeom.boundingBox) {
+                const minX = wordGeom.boundingBox.min.x;
+                const maxX = wordGeom.boundingBox.max.x;
+
+                // Validate bounding box values
+                if (!isNaN(minX) && !isNaN(maxX)) {
+                  wordWidth = maxX - minX;
+                }
+              }
+
+              // Fallback if width is invalid
+              if (isNaN(wordWidth) || wordWidth <= 0) {
+                wordWidth = finalFontSize * word.length * 0.5;
+              }
+
+              finalWordWidths.push(wordWidth);
+              finalTotalWordWidth += wordWidth;
+              finalWordGeometries.push(wordGeom);
+            } catch (error) {
+              console.warn(
+                `Error creating geometry for word "${word}":`,
+                error
+              );
+              // Use fallback width
+              const fallbackWidth = finalFontSize * word.length * 0.5;
+              finalWordWidths.push(fallbackWidth);
+              finalTotalWordWidth += fallbackWidth;
+              // Don't add geometry if creation failed
+            }
+          }
+
+          // If no valid geometries were created, skip this line
+          if (finalWordGeometries.length === 0) {
+            currentY -= lineHeight;
+            continue;
+          }
+
+          // Step 7: Recalculate spacing if font was scaled (but not if we used an override)
+          // Skip recalculation if we used firstLineFontSizeOverride, as spacing was already calculated in Step 5
+          const usedOverride =
+            isFirstLine &&
+            firstLineFontSizeOverride !== undefined &&
+            firstLineFontSizeOverride > 0;
+
+          if (finalFontSize !== baseSize && !isLastLine && !usedOverride) {
+            const newTotalWidthWithNormalSpacing =
+              finalTotalWordWidth + numSpaces * normalSpaceWidth;
+            const newRemainingSpace = maxWidth - newTotalWidthWithNormalSpacing;
+
+            if (newRemainingSpace > 0 && numSpaces > 0) {
+              const maxExtraSpacePerGap =
+                maxAllowedSpaceBetweenWords - normalSpaceWidth;
+              const maxTotalExtraSpace = numSpaces * maxExtraSpacePerGap;
+
+              if (newRemainingSpace <= maxTotalExtraSpace) {
+                const extraSpacePerGap = newRemainingSpace / numSpaces;
+                spaceBetweenWords = normalSpaceWidth + extraSpacePerGap;
+              } else {
+                spaceBetweenWords = maxAllowedSpaceBetweenWords;
+                // If still space remaining, it should be minimal due to scaling
+                // Distribute any tiny remaining space
+                const finalRemaining =
+                  maxWidth -
+                  (finalTotalWordWidth +
+                    numSpaces * maxAllowedSpaceBetweenWords);
+                if (Math.abs(finalRemaining) > 0.001 && numSpaces > 0) {
+                  const extraSpacePerGap = finalRemaining / numSpaces;
+                  spaceBetweenWords += extraSpacePerGap;
+                }
+              }
+            }
+          }
+
+          // Step 8: Position words with justified spacing
+          // For last line: left-align only (no right justification)
+          // For other lines: full justification (left and right margins)
+          let currentX = 0;
+
+          if (isLastLine) {
+            // Last line: left-align only, use max spacing
+            for (let i = 0; i < words.length; i++) {
+              const wordGeom = finalWordGeometries[i].clone();
+              wordGeom.translate(currentX, currentY, 0);
+              geometries.push(wordGeom);
+              if (i < words.length - 1) {
+                currentX += finalWordWidths[i] + spaceBetweenWords;
+              } else {
+                currentX += finalWordWidths[i];
+              }
+            }
+          } else {
+            // Other lines: full justification (fill both margins)
+            const totalWidthWithSpacing =
+              finalTotalWordWidth + numSpaces * spaceBetweenWords;
+            const finalRemainingSpace = maxWidth - totalWidthWithSpacing;
+
+            // Distribute any tiny remaining space evenly for perfect justification
+            if (Math.abs(finalRemainingSpace) > 0.001 && numSpaces > 0) {
+              const extraSpacePerGap = finalRemainingSpace / numSpaces;
+              spaceBetweenWords += extraSpacePerGap;
+            }
+
+            for (let i = 0; i < words.length; i++) {
+              const wordGeom = finalWordGeometries[i].clone();
+              wordGeom.translate(currentX, currentY, 0);
+              geometries.push(wordGeom);
+              if (i < words.length - 1) {
+                currentX += finalWordWidths[i] + spaceBetweenWords;
+              } else {
+                currentX += finalWordWidths[i];
+              }
+            }
+          }
+
+          // Dispose original word geometries
+          finalWordGeometries.forEach((geom) => geom.dispose());
+        }
+
+        currentY -= lineHeight;
+      }
+
+      // Merge all geometries into one
+      if (geometries.length === 0) {
+        return {
+          geometry: new THREE.BufferGeometry(),
+          firstLineFontSize: actualFirstLineFontSize,
+        };
+      }
+
+      if (geometries.length === 1) {
+        return {
+          geometry: geometries[0],
+          firstLineFontSize: actualFirstLineFontSize,
+        };
+      }
+
+      // Manually merge geometries by combining attributes
+      const mergedGeometry = new THREE.BufferGeometry();
+      const positions: number[] = [];
+      const normals: number[] = [];
+      const uvs: number[] = [];
+      let indexOffset = 0;
+      const indices: number[] = [];
+
+      // Check if all geometries have normals and uvs
+      let hasNormals = true;
+      let hasUvs = true;
+      for (const geom of geometries) {
+        if (!geom.attributes.normal) hasNormals = false;
+        if (!geom.attributes.uv) hasUvs = false;
+      }
+
+      for (const geom of geometries) {
+        const pos = geom.attributes.position;
+        const norm = geom.attributes.normal;
+        const uv = geom.attributes.uv;
+        const index = geom.index;
+
+        if (!pos || pos.count === 0) {
+          continue; // Skip empty geometries
+        }
+
+        const vertexCount = pos.count;
+
+        for (let i = 0; i < vertexCount; i++) {
+          const x = pos.getX(i);
+          const y = pos.getY(i);
+          const z = pos.getZ(i);
+
+          // Validate values are not NaN
+          if (isNaN(x) || isNaN(y) || isNaN(z)) {
+            console.warn(
+              "NaN value detected in geometry position, skipping vertex"
+            );
+            continue;
+          }
+
+          positions.push(x, y, z);
+
+          if (hasNormals && norm) {
+            const nx = norm.getX(i);
+            const ny = norm.getY(i);
+            const nz = norm.getZ(i);
+            normals.push(
+              isNaN(nx) ? 0 : nx,
+              isNaN(ny) ? 0 : ny,
+              isNaN(nz) ? 0 : nz
+            );
+          } else if (hasNormals) {
+            // Fill with default normal if missing
+            normals.push(0, 0, 1);
+          }
+
+          if (hasUvs && uv) {
+            const u = uv.getX(i);
+            const v = uv.getY(i);
+            uvs.push(isNaN(u) ? 0 : u, isNaN(v) ? 0 : v);
+          } else if (hasUvs) {
+            // Fill with default UV if missing
+            uvs.push(0, 0);
+          }
+        }
+
+        if (index && index.count > 0) {
+          // Access index array properly
+          const indexArray = index.array;
+          for (let i = 0; i < index.count; i++) {
+            const idx = indexArray[i];
+            if (!isNaN(idx) && idx >= 0 && idx < vertexCount) {
+              indices.push(idx + indexOffset);
+            }
+          }
+          indexOffset += vertexCount;
+        } else {
+          // No index, create sequential indices
+          for (let i = 0; i < vertexCount; i++) {
+            indices.push(i + indexOffset);
+          }
+          indexOffset += vertexCount;
+        }
+      }
+
+      // Validate we have valid data before creating attributes
+      if (positions.length === 0) {
+        console.warn("No valid positions found, returning empty geometry");
+        geometries.forEach((geom) => geom.dispose());
+        return {
+          geometry: new THREE.BufferGeometry(),
+          firstLineFontSize: actualFirstLineFontSize,
+        };
+      }
+
+      mergedGeometry.setAttribute(
+        "position",
+        new THREE.Float32BufferAttribute(positions, 3)
+      );
+
+      if (
+        hasNormals &&
+        normals.length > 0 &&
+        normals.length === positions.length
+      ) {
+        mergedGeometry.setAttribute(
+          "normal",
+          new THREE.Float32BufferAttribute(normals, 3)
+        );
+      }
+
+      if (
+        hasUvs &&
+        uvs.length > 0 &&
+        uvs.length === (positions.length / 3) * 2
+      ) {
+        mergedGeometry.setAttribute(
+          "uv",
+          new THREE.Float32BufferAttribute(uvs, 2)
+        );
+      }
+
+      if (indices.length > 0) {
+        mergedGeometry.setIndex(indices);
+      }
+
+      // Dispose individual geometries after merging
+      geometries.forEach((geom) => geom.dispose());
+
+      // Compute bounding box for the merged geometry
+      try {
+        mergedGeometry.computeBoundingBox();
+      } catch (error) {
+        console.warn("Failed to compute bounding box:", error);
+        // Set a default bounding box to prevent errors
+        mergedGeometry.boundingBox = new THREE.Box3(
+          new THREE.Vector3(-1, -1, -1),
+          new THREE.Vector3(1, 1, 1)
+        );
+      }
+
+      return {
+        geometry: mergedGeometry,
+        firstLineFontSize: actualFirstLineFontSize,
+      };
     }
 
     function updateSizing() {
@@ -1315,7 +2065,14 @@ export function useDoorSceneSetup({
         const rightOuterWidthWorldText =
           rightOuterRightWorldText - rightOuterLeftWorldText;
 
-        const textY = -portalHeightWorld / 2 - 0.3; // Slightly below portal bottom
+        // Use the same width for both texts to ensure matching justification
+        // Use the minimum width to ensure both fit, or use left width for consistency
+        const commonColumnWidth = Math.min(
+          leftOuterWidthWorldText,
+          rightOuterWidthWorldText
+        );
+
+        const textY = -0.6; // Centered in the middle of y-axis
 
         // Determine text size based on screen width
         let columnTextSize: number;
@@ -1333,11 +2090,11 @@ export function useDoorSceneSetup({
         const distortionMargin = 0.05; // Extra margin for wavy text distortion
         const effectivePaddingRatio = paddingRatio + distortionMargin;
 
-        // Calculate available width for text wrapping
-        const leftMaxAllowedWidthForWrap =
-          leftOuterWidthWorldText * (1 - 2 * effectivePaddingRatio);
-        const rightMaxAllowedWidthForWrap =
-          rightOuterWidthWorldText * (1 - 2 * effectivePaddingRatio);
+        // Calculate available width for text wrapping - use same width for both
+        const commonMaxAllowedWidthForWrap =
+          commonColumnWidth * (1 - 2 * effectivePaddingRatio);
+        const leftMaxAllowedWidthForWrap = commonMaxAllowedWidthForWrap;
+        const rightMaxAllowedWidthForWrap = commonMaxAllowedWidthForWrap;
 
         // Wrap text if font is loaded
         if (columnTextFont) {
@@ -1366,38 +2123,110 @@ export function useDoorSceneSetup({
           const rightCurrentText = rightTextMesh.userData.currentWrappedText;
 
           // Recreate geometry if text changed
+          let leftFirstLineFontSize: number | undefined = undefined;
+
+          // Always ensure we have the left text's first line font size
+          // If geometry needs to be recreated, we'll get it from the result
+          // Otherwise, try to get it from stored userData
           if (leftCurrentText !== leftWrappedText) {
             leftTextMesh.geometry.dispose();
-            const newGeometry = new TextGeometry(leftWrappedText, {
-              font: columnTextFont,
-              size: columnTextSize,
-              depth: 0.02,
-              curveSegments: 12,
-              bevelEnabled: false,
-            });
-            newGeometry.computeBoundingBox();
-            const centerOffset =
-              newGeometry.boundingBox!.max.x - newGeometry.boundingBox!.min.x;
-            newGeometry.translate(-centerOffset / 2, 0, 0);
-            leftTextMesh.geometry = newGeometry;
+            // Calculate line height (typically 1.2-1.5 times font size)
+            const lineHeight = columnTextSize * 1.3;
+            const result = createJustifiedTextGeometry(
+              leftWrappedText,
+              columnTextFont,
+              columnTextSize,
+              leftMaxAllowedWidthForWrap,
+              lineHeight
+            );
+            result.geometry.computeBoundingBox();
+            leftTextMesh.geometry = result.geometry;
             leftTextMesh.userData.currentWrappedText = leftWrappedText;
+            // Store first line font size for right text
+            leftFirstLineFontSize = result.firstLineFontSize;
+            leftTextMesh.userData.firstLineFontSize = result.firstLineFontSize;
+            console.log(
+              "Left text first line font size calculated:",
+              leftFirstLineFontSize,
+              "base size:",
+              columnTextSize
+            );
+          } else {
+            // If geometry wasn't recreated, try to get stored first line font size
+            leftFirstLineFontSize = leftTextMesh.userData.firstLineFontSize;
+
+            // If we don't have it stored, we need to calculate it
+            // This can happen if the geometry was created before we added this feature
+            if (
+              leftFirstLineFontSize === undefined ||
+              leftFirstLineFontSize <= 0
+            ) {
+              // Recalculate to get the first line font size
+              const lineHeight = columnTextSize * 1.3;
+              const tempResult = createJustifiedTextGeometry(
+                leftWrappedText,
+                columnTextFont,
+                columnTextSize,
+                leftMaxAllowedWidthForWrap,
+                lineHeight
+              );
+              leftFirstLineFontSize = tempResult.firstLineFontSize;
+              leftTextMesh.userData.firstLineFontSize = leftFirstLineFontSize;
+              // Dispose the temporary geometry since we already have the real one
+              tempResult.geometry.dispose();
+            }
           }
 
-          if (rightCurrentText !== rightWrappedText) {
+          // Always recreate right text if left text changed OR right text changed
+          // This ensures right text always uses the correct left text first line font size
+          const shouldRecreateRightText =
+            rightCurrentText !== rightWrappedText ||
+            leftCurrentText !== leftWrappedText ||
+            rightTextMesh.userData.firstLineFontSize !== leftFirstLineFontSize;
+
+          if (shouldRecreateRightText) {
             rightTextMesh.geometry.dispose();
-            const newGeometry = new TextGeometry(rightWrappedText, {
-              font: columnTextFont,
-              size: columnTextSize,
-              depth: 0.02,
-              curveSegments: 12,
-              bevelEnabled: false,
-            });
-            newGeometry.computeBoundingBox();
-            const centerOffset =
-              newGeometry.boundingBox!.max.x - newGeometry.boundingBox!.min.x;
-            newGeometry.translate(-centerOffset / 2, 0, 0);
-            rightTextMesh.geometry = newGeometry;
+            // Calculate line height (typically 1.2-1.5 times font size)
+            const lineHeight = columnTextSize * 1.3;
+
+            // Ensure we have the left text's first line font size
+            if (
+              leftFirstLineFontSize === undefined ||
+              leftFirstLineFontSize <= 0 ||
+              isNaN(leftFirstLineFontSize)
+            ) {
+              console.warn(
+                "Left text first line font size not available, using base size",
+                leftFirstLineFontSize
+              );
+              leftFirstLineFontSize = columnTextSize;
+            }
+
+            console.log(
+              "Creating right text with first line font size:",
+              leftFirstLineFontSize,
+              "base size:",
+              columnTextSize
+            );
+
+            const result = createJustifiedTextGeometry(
+              rightWrappedText,
+              columnTextFont,
+              columnTextSize,
+              rightMaxAllowedWidthForWrap,
+              lineHeight,
+              leftFirstLineFontSize // Use left text's first line font size
+            );
+            result.geometry.computeBoundingBox();
+            rightTextMesh.geometry = result.geometry;
             rightTextMesh.userData.currentWrappedText = rightWrappedText;
+            // Store first line font size for reference
+            rightTextMesh.userData.firstLineFontSize = result.firstLineFontSize;
+
+            console.log(
+              "Right text first line font size result:",
+              result.firstLineFontSize
+            );
           }
         }
 
@@ -1416,10 +2245,11 @@ export function useDoorSceneSetup({
           rightTextMesh.geometry.boundingBox!.max.x -
           rightTextMesh.geometry.boundingBox!.min.x;
 
-        const leftMaxAllowedWidth =
-          leftOuterWidthWorldText * (1 - 2 * effectivePaddingRatio);
-        const rightMaxAllowedWidth =
-          rightOuterWidthWorldText * (1 - 2 * effectivePaddingRatio);
+        // Use common width for both texts to ensure matching justification
+        const commonMaxAllowedWidth =
+          commonColumnWidth * (1 - 2 * effectivePaddingRatio);
+        const leftMaxAllowedWidth = commonMaxAllowedWidth;
+        const rightMaxAllowedWidth = commonMaxAllowedWidth;
 
         // Calculate scale: ensure text fits within column boundaries
         // Geometry is already created at columnTextSize, so base width is already correct
@@ -1483,37 +2313,18 @@ export function useDoorSceneSetup({
         const finalLeftTextWidth = leftTextBaseWidth * finalLeftTextScale;
         const finalRightTextWidth = rightTextBaseWidth * finalRightTextScale;
 
-        // Position left text: left-aligned within left outer column
-        let leftTextX = leftTextMinX + finalLeftTextWidth / 2;
-        // Ensure right edge doesn't exceed column boundary
-        const leftTextRightEdge = leftTextX + finalLeftTextWidth / 2;
-        if (leftTextRightEdge > leftTextMaxX) {
-          leftTextX = leftTextMaxX - finalLeftTextWidth / 2;
-        }
-        // Ensure left edge doesn't go below minimum
-        const leftTextLeftEdge = leftTextX - finalLeftTextWidth / 2;
-        if (leftTextLeftEdge < leftTextMinX) {
-          leftTextX = leftTextMinX + finalLeftTextWidth / 2;
-        }
+        // Position justified texts at left edge of their columns
+        // The justified geometry starts at x=0 and fills the width
+        // For left text: first line is right-aligned, other lines are justified from left
+        // For right text: all lines are justified from left
+        const leftTextX = leftTextMinX;
+        const rightTextX = rightTextMinX;
 
-        // Position right text: right-aligned within right outer column
-        let rightTextX = rightTextMaxX - finalRightTextWidth / 2;
-        // Ensure left edge doesn't exceed column boundary
-        const rightTextLeftEdge = rightTextX - finalRightTextWidth / 2;
-        if (rightTextLeftEdge < rightTextMinX) {
-          rightTextX = rightTextMinX + finalRightTextWidth / 2;
-        }
-        // Ensure right edge doesn't go above maximum
-        const rightTextRightEdge = rightTextX + finalRightTextWidth / 2;
-        if (rightTextRightEdge > rightTextMaxX) {
-          rightTextX = rightTextMaxX - finalRightTextWidth / 2;
-        }
-
-        // Update left column text - left-aligned within red column
+        // Update left column text - justified, first line right-aligned
         leftTextMesh.position.set(leftTextX, textY, textZ);
         leftTextMesh.scale.setScalar(finalLeftTextScale);
 
-        // Update right column text - right-aligned within blue column
+        // Update right column text - justified
         rightTextMesh.position.set(rightTextX, textY, textZ);
         rightTextMesh.scale.setScalar(finalRightTextScale);
       }
