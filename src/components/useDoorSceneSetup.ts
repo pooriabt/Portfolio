@@ -702,14 +702,9 @@ export function useDoorSceneSetup({
       if (!pointerInsidePortal(portal, pointer)) return;
 
       if (which === "left") {
-        if (archController) archController.showClickEllipse?.();
         toggleLeft();
       }
       if (which === "right") {
-        portal.uniforms.uShowClickEllipse.value = 1.0;
-        setTimeout(() => {
-          portal.uniforms.uShowClickEllipse.value = 0.0;
-        }, 500);
         toggleRight();
       }
     }
@@ -2072,16 +2067,15 @@ export function useDoorSceneSetup({
           rightOuterWidthWorldText
         );
 
-        const textY = -0.6; // Centered in the middle of y-axis
+        const textY = -1.6; // Centered in the middle of y-axis
 
         // Determine text size based on screen width
+        // Text only renders at 900px and above, sharply disappears below 900px
         let columnTextSize: number;
         if (viewportWidthCss >= 900) {
           columnTextSize = 0.2;
-        } else if (viewportWidthCss > 700 && viewportWidthCss < 900) {
-          columnTextSize = 0.175;
         } else {
-          columnTextSize = 0.0;
+          columnTextSize = 0.0; // No rendering below 900px
         }
 
         // Padding from column edges (10% on each side = 20% total padding)
@@ -2096,8 +2090,13 @@ export function useDoorSceneSetup({
         const leftMaxAllowedWidthForWrap = commonMaxAllowedWidthForWrap;
         const rightMaxAllowedWidthForWrap = commonMaxAllowedWidthForWrap;
 
-        // Wrap text if font is loaded
-        if (columnTextFont) {
+        // Skip text rendering if columnTextSize is 0 (viewport width < 900px)
+        if (columnTextSize <= 0) {
+          // Hide text meshes by setting scale to 0
+          leftTextMesh.scale.setScalar(0);
+          rightTextMesh.scale.setScalar(0);
+          // Skip geometry creation and positioning
+        } else if (columnTextFont) {
           // Get original text
           const leftOriginalText =
             leftTextMesh.userData.originalText || leftColumnText;
@@ -2189,22 +2188,90 @@ export function useDoorSceneSetup({
             // Calculate line height (typically 1.2-1.5 times font size)
             const lineHeight = columnTextSize * 1.3;
 
-            // Ensure we have the left text's first line font size
+            // Calculate font size for right text's first line to fill entire width
+            let rightFirstLineFontSize: number | undefined = undefined;
+
+            // Get the first line of the right text
+            const rightFirstLine = rightWrappedText.split("\n")[0]?.trim();
+            if (rightFirstLine && columnTextFont) {
+              // Binary search or iterative approach to find font size that fills width
+              // Start with a reasonable range
+              let minSize = columnTextSize * 0.5;
+              let maxSize = columnTextSize * 3.0;
+              let targetSize = columnTextSize;
+              const tolerance = 0.001; // 0.1% tolerance
+              const maxIterations = 20;
+
+              for (let iter = 0; iter < maxIterations; iter++) {
+                // Test current size
+                try {
+                  const testGeom = new TextGeometry(rightFirstLine, {
+                    font: columnTextFont,
+                    size: targetSize,
+                    depth: 0.02,
+                    curveSegments: 12,
+                    bevelEnabled: false,
+                  });
+                  testGeom.computeBoundingBox();
+                  let lineWidth = 0;
+                  if (testGeom.boundingBox) {
+                    const minX = testGeom.boundingBox.min.x;
+                    const maxX = testGeom.boundingBox.max.x;
+                    if (!isNaN(minX) && !isNaN(maxX)) {
+                      lineWidth = maxX - minX;
+                    }
+                  }
+                  testGeom.dispose();
+
+                  if (isNaN(lineWidth) || lineWidth <= 0) {
+                    break; // Can't calculate, use fallback
+                  }
+
+                  const ratio = rightMaxAllowedWidthForWrap / lineWidth;
+
+                  // Check if we're close enough
+                  if (Math.abs(ratio - 1.0) < tolerance) {
+                    rightFirstLineFontSize = targetSize;
+                    break;
+                  }
+
+                  // Adjust size based on ratio
+                  if (ratio < 1.0) {
+                    // Line is too wide, reduce size
+                    maxSize = targetSize;
+                    targetSize = (minSize + maxSize) / 2;
+                  } else {
+                    // Line is too narrow, increase size
+                    minSize = targetSize;
+                    targetSize = (minSize + maxSize) / 2;
+                  }
+
+                  // Update rightFirstLineFontSize with current best guess
+                  rightFirstLineFontSize = targetSize;
+                } catch (error) {
+                  console.warn(
+                    "Error calculating right first line font size:",
+                    error
+                  );
+                  break;
+                }
+              }
+            }
+
+            // Fallback to base size if calculation failed
             if (
-              leftFirstLineFontSize === undefined ||
-              leftFirstLineFontSize <= 0 ||
-              isNaN(leftFirstLineFontSize)
+              rightFirstLineFontSize === undefined ||
+              rightFirstLineFontSize <= 0 ||
+              isNaN(rightFirstLineFontSize)
             ) {
-              console.warn(
-                "Left text first line font size not available, using base size",
-                leftFirstLineFontSize
-              );
-              leftFirstLineFontSize = columnTextSize;
+              rightFirstLineFontSize = columnTextSize;
             }
 
             console.log(
-              "Creating right text with first line font size:",
-              leftFirstLineFontSize,
+              "Creating right text with calculated first line font size:",
+              rightFirstLineFontSize,
+              "to fill width:",
+              rightMaxAllowedWidthForWrap,
               "base size:",
               columnTextSize
             );
@@ -2215,7 +2282,7 @@ export function useDoorSceneSetup({
               columnTextSize,
               rightMaxAllowedWidthForWrap,
               lineHeight,
-              leftFirstLineFontSize // Use left text's first line font size
+              rightFirstLineFontSize // Use calculated font size to fill width
             );
             result.geometry.computeBoundingBox();
             rightTextMesh.geometry = result.geometry;
@@ -2230,103 +2297,116 @@ export function useDoorSceneSetup({
           }
         }
 
-        // Get text geometry bounding boxes
-        if (!leftTextMesh.geometry.boundingBox) {
-          leftTextMesh.geometry.computeBoundingBox();
+        // Only position and scale texts if they should be visible (columnTextSize > 0)
+        if (columnTextSize > 0) {
+          // Get text geometry bounding boxes
+          if (!leftTextMesh.geometry.boundingBox) {
+            leftTextMesh.geometry.computeBoundingBox();
+          }
+          if (!rightTextMesh.geometry.boundingBox) {
+            rightTextMesh.geometry.computeBoundingBox();
+          }
+
+          const leftTextBaseWidth =
+            leftTextMesh.geometry.boundingBox!.max.x -
+            leftTextMesh.geometry.boundingBox!.min.x;
+          const rightTextBaseWidth =
+            rightTextMesh.geometry.boundingBox!.max.x -
+            rightTextMesh.geometry.boundingBox!.min.x;
+
+          // Use common width for both texts to ensure matching justification
+          const commonMaxAllowedWidth =
+            commonColumnWidth * (1 - 2 * effectivePaddingRatio);
+          const leftMaxAllowedWidth = commonMaxAllowedWidth;
+          const rightMaxAllowedWidth = commonMaxAllowedWidth;
+
+          // Calculate scale: ensure text fits within column boundaries
+          // Geometry is already created at columnTextSize, so base width is already correct
+          // Only scale down if text still doesn't fit after wrapping
+          const leftTextScale = Math.min(
+            1.0, // Geometry is already at columnTextSize, no scaling needed
+            leftMaxAllowedWidth / Math.max(leftTextBaseWidth, 1e-6) // Width constraint - scale down if needed
+          );
+          const rightTextScale = Math.min(
+            1.0, // Geometry is already at columnTextSize, no scaling needed
+            rightMaxAllowedWidth / Math.max(rightTextBaseWidth, 1e-6) // Width constraint - scale down if needed
+          );
+
+          // Calculate actual text width after scaling (base width only)
+          const leftTextActualWidth = leftTextBaseWidth * leftTextScale;
+          const rightTextActualWidth = rightTextBaseWidth * rightTextScale;
+
+          // Position texts with proper alignment within columns
+
+          // Calculate safe text boundaries within each column
+          // Left text must stay strictly within left outer column: [leftOuterLeftWorldText, leftOuterRightWorldText]
+          const leftTextMinX = Math.max(
+            leftOuterLeftWorldText +
+              effectivePaddingRatio * leftOuterWidthWorldText,
+            frustumLeftEdgeWorldText
+          );
+          const leftTextMaxX = Math.min(
+            leftOuterRightWorldText -
+              effectivePaddingRatio * leftOuterWidthWorldText,
+            frustumRightEdgeWorldText
+          );
+
+          // Right text must stay strictly within right outer column: [rightOuterLeftWorldText, rightOuterRightWorldText]
+          const rightTextMinX = Math.max(
+            rightOuterLeftWorldText +
+              effectivePaddingRatio * rightOuterWidthWorldText,
+            frustumLeftEdgeWorldText
+          );
+          const rightTextMaxX = Math.min(
+            rightOuterRightWorldText -
+              effectivePaddingRatio * rightOuterWidthWorldText,
+            frustumRightEdgeWorldText
+          );
+
+          // Ensure text fits within available space
+          const leftTextAvailableWidth = leftTextMaxX - leftTextMinX;
+          const rightTextAvailableWidth = rightTextMaxX - rightTextMinX;
+
+          // If text doesn't fit, reduce scale further
+          let finalLeftTextScale = leftTextScale;
+          let finalRightTextScale = rightTextScale;
+
+          if (leftTextActualWidth > leftTextAvailableWidth) {
+            finalLeftTextScale = leftTextAvailableWidth / leftTextBaseWidth;
+          }
+          if (rightTextActualWidth > rightTextAvailableWidth) {
+            finalRightTextScale = rightTextAvailableWidth / rightTextBaseWidth;
+          }
+
+          // Recalculate actual widths with final scale
+          const finalLeftTextWidth = leftTextBaseWidth * finalLeftTextScale;
+          const finalRightTextWidth = rightTextBaseWidth * finalRightTextScale;
+
+          // Position justified texts at left edge of their columns
+          // The justified geometry starts at x=0 and fills the width
+          // For left text: first line is right-aligned, other lines are justified from left
+          // For right text: all lines are justified from left
+          const leftTextX = leftTextMinX;
+          const rightTextX = rightTextMinX;
+
+          // Update left column text - justified, first line right-aligned
+          leftTextMesh.position.set(leftTextX, textY, textZ);
+          leftTextMesh.scale.setScalar(finalLeftTextScale);
+          // Store target position and scale for scroll animation
+          leftTextMesh.userData.targetX = leftTextX;
+          leftTextMesh.userData.targetY = textY;
+          leftTextMesh.userData.targetZ = textZ;
+          leftTextMesh.userData.finalScale = finalLeftTextScale;
+
+          // Update right column text - justified
+          rightTextMesh.position.set(rightTextX, textY, textZ);
+          rightTextMesh.scale.setScalar(finalRightTextScale);
+          // Store target position and scale for scroll animation
+          rightTextMesh.userData.targetX = rightTextX;
+          rightTextMesh.userData.targetY = textY;
+          rightTextMesh.userData.targetZ = textZ;
+          rightTextMesh.userData.finalScale = finalRightTextScale;
         }
-        if (!rightTextMesh.geometry.boundingBox) {
-          rightTextMesh.geometry.computeBoundingBox();
-        }
-
-        const leftTextBaseWidth =
-          leftTextMesh.geometry.boundingBox!.max.x -
-          leftTextMesh.geometry.boundingBox!.min.x;
-        const rightTextBaseWidth =
-          rightTextMesh.geometry.boundingBox!.max.x -
-          rightTextMesh.geometry.boundingBox!.min.x;
-
-        // Use common width for both texts to ensure matching justification
-        const commonMaxAllowedWidth =
-          commonColumnWidth * (1 - 2 * effectivePaddingRatio);
-        const leftMaxAllowedWidth = commonMaxAllowedWidth;
-        const rightMaxAllowedWidth = commonMaxAllowedWidth;
-
-        // Calculate scale: ensure text fits within column boundaries
-        // Geometry is already created at columnTextSize, so base width is already correct
-        // Only scale down if text still doesn't fit after wrapping
-        const leftTextScale = Math.min(
-          1.0, // Geometry is already at columnTextSize, no scaling needed
-          leftMaxAllowedWidth / Math.max(leftTextBaseWidth, 1e-6) // Width constraint - scale down if needed
-        );
-        const rightTextScale = Math.min(
-          1.0, // Geometry is already at columnTextSize, no scaling needed
-          rightMaxAllowedWidth / Math.max(rightTextBaseWidth, 1e-6) // Width constraint - scale down if needed
-        );
-
-        // Calculate actual text width after scaling (base width only)
-        const leftTextActualWidth = leftTextBaseWidth * leftTextScale;
-        const rightTextActualWidth = rightTextBaseWidth * rightTextScale;
-
-        // Position texts with proper alignment within columns
-
-        // Calculate safe text boundaries within each column
-        // Left text must stay strictly within left outer column: [leftOuterLeftWorldText, leftOuterRightWorldText]
-        const leftTextMinX = Math.max(
-          leftOuterLeftWorldText +
-            effectivePaddingRatio * leftOuterWidthWorldText,
-          frustumLeftEdgeWorldText
-        );
-        const leftTextMaxX = Math.min(
-          leftOuterRightWorldText -
-            effectivePaddingRatio * leftOuterWidthWorldText,
-          frustumRightEdgeWorldText
-        );
-
-        // Right text must stay strictly within right outer column: [rightOuterLeftWorldText, rightOuterRightWorldText]
-        const rightTextMinX = Math.max(
-          rightOuterLeftWorldText +
-            effectivePaddingRatio * rightOuterWidthWorldText,
-          frustumLeftEdgeWorldText
-        );
-        const rightTextMaxX = Math.min(
-          rightOuterRightWorldText -
-            effectivePaddingRatio * rightOuterWidthWorldText,
-          frustumRightEdgeWorldText
-        );
-
-        // Ensure text fits within available space
-        const leftTextAvailableWidth = leftTextMaxX - leftTextMinX;
-        const rightTextAvailableWidth = rightTextMaxX - rightTextMinX;
-
-        // If text doesn't fit, reduce scale further
-        let finalLeftTextScale = leftTextScale;
-        let finalRightTextScale = rightTextScale;
-
-        if (leftTextActualWidth > leftTextAvailableWidth) {
-          finalLeftTextScale = leftTextAvailableWidth / leftTextBaseWidth;
-        }
-        if (rightTextActualWidth > rightTextAvailableWidth) {
-          finalRightTextScale = rightTextAvailableWidth / rightTextBaseWidth;
-        }
-
-        // Recalculate actual widths with final scale
-        const finalLeftTextWidth = leftTextBaseWidth * finalLeftTextScale;
-        const finalRightTextWidth = rightTextBaseWidth * finalRightTextScale;
-
-        // Position justified texts at left edge of their columns
-        // The justified geometry starts at x=0 and fills the width
-        // For left text: first line is right-aligned, other lines are justified from left
-        // For right text: all lines are justified from left
-        const leftTextX = leftTextMinX;
-        const rightTextX = rightTextMinX;
-
-        // Update left column text - justified, first line right-aligned
-        leftTextMesh.position.set(leftTextX, textY, textZ);
-        leftTextMesh.scale.setScalar(finalLeftTextScale);
-
-        // Update right column text - justified
-        rightTextMesh.position.set(rightTextX, textY, textZ);
-        rightTextMesh.scale.setScalar(finalRightTextScale);
       }
 
       projectObjectToScreenUv(
@@ -2635,6 +2715,38 @@ export function useDoorSceneSetup({
               (spiral.material.uniforms as any).uScrollFade.value = 1.0;
             }
           }
+          // Hide side texts initially - position them off-screen and scale to 0
+          if (columnTexts.length >= 2) {
+            const leftTextMesh = columnTexts[0];
+            const rightTextMesh = columnTexts[1];
+
+            // Calculate off-screen positions
+            const textZ =
+              leftTextMesh.userData.targetZ || leftTextMesh.position.z || 0;
+            const aspect = camera.aspect;
+            const fov = camera.fov * (Math.PI / 180);
+            const heightAtDepth =
+              2 * Math.tan(fov / 2) * Math.abs(camera.position.z - textZ);
+            const widthAtDepth = heightAtDepth * aspect;
+            const leftFrustumEdge = -widthAtDepth / 2;
+            const rightFrustumEdge = widthAtDepth / 2;
+            const offScreenOffset = 15;
+
+            // Position off-screen and scale to 0
+            if (leftTextMesh.userData.targetX !== undefined) {
+              leftTextMesh.position.x = leftFrustumEdge - offScreenOffset;
+              leftTextMesh.position.y = leftTextMesh.userData.targetY || 0;
+              leftTextMesh.position.z = leftTextMesh.userData.targetZ || 0;
+            }
+            if (rightTextMesh.userData.targetX !== undefined) {
+              rightTextMesh.position.x = rightFrustumEdge + offScreenOffset;
+              rightTextMesh.position.y = rightTextMesh.userData.targetY || 0;
+              rightTextMesh.position.z = rightTextMesh.userData.targetZ || 0;
+            }
+            // Scale to 0 to hide them
+            leftTextMesh.scale.setScalar(0);
+            rightTextMesh.scale.setScalar(0);
+          }
         };
 
         if (textGroupRef.current && (english || farsi)) {
@@ -2752,6 +2864,161 @@ export function useDoorSceneSetup({
                 textGroupRef.current?.scale.setScalar(1);
               }
 
+              // ============================================
+              // STEP 4: Side texts animation (synchronized with scale down)
+              // ============================================
+              // Side texts animate in during the same timeline as farsi/english texts scale down
+              // scaleProgress starts at progress 0.4 and goes from 0 to 1 as progress goes from 0.4 to 1.0
+              if (columnTexts.length >= 2 && scaleProgress > 0) {
+                const leftTextMesh = columnTexts[0];
+                const rightTextMesh = columnTexts[1];
+
+                // Only animate if texts have target positions stored (they should be visible)
+                const shouldAnimateLeft =
+                  leftTextMesh.userData.targetX !== undefined;
+                const shouldAnimateRight =
+                  rightTextMesh.userData.targetX !== undefined;
+
+                if (shouldAnimateLeft || shouldAnimateRight) {
+                  // Use scaleProgress directly - it goes from 0 to 1 during the scale down phase
+                  // This synchronizes side text animation with farsi/english text scale down
+                  const sideTextProgress = scaleProgress;
+                  // Use easing for smooth animation
+                  const easedProgress =
+                    sideTextProgress *
+                    sideTextProgress *
+                    (3.0 - 2.0 * sideTextProgress); // smoothstep
+
+                  // Store target positions if not already stored
+                  if (leftTextMesh.userData.targetX === undefined) {
+                    leftTextMesh.userData.targetX = leftTextMesh.position.x;
+                    leftTextMesh.userData.targetY = leftTextMesh.position.y;
+                    leftTextMesh.userData.targetZ = leftTextMesh.position.z;
+                  }
+                  if (rightTextMesh.userData.targetX === undefined) {
+                    rightTextMesh.userData.targetX = rightTextMesh.position.x;
+                    rightTextMesh.userData.targetY = rightTextMesh.position.y;
+                    rightTextMesh.userData.targetZ = rightTextMesh.position.z;
+                  }
+
+                  // Calculate off-screen positions using camera frustum
+                  const frustum = new THREE.Frustum();
+                  const matrix = new THREE.Matrix4().multiplyMatrices(
+                    camera.projectionMatrix,
+                    camera.matrixWorldInverse
+                  );
+                  frustum.setFromProjectionMatrix(matrix);
+
+                  // Get frustum bounds at text depth
+                  // Use a large offset to ensure they're completely off-screen
+                  const offScreenOffset = 15; // World units
+
+                  // Calculate world space positions at text depth (z = textZ)
+                  // Approximate frustum edges at text depth
+                  const textZ =
+                    leftTextMesh.userData.targetZ || leftTextMesh.position.z;
+                  const aspect = camera.aspect;
+                  const fov = camera.fov * (Math.PI / 180);
+                  const heightAtDepth =
+                    2 * Math.tan(fov / 2) * Math.abs(camera.position.z - textZ);
+                  const widthAtDepth = heightAtDepth * aspect;
+
+                  const leftFrustumEdge = -widthAtDepth / 2;
+                  const rightFrustumEdge = widthAtDepth / 2;
+
+                  const leftStartX = leftFrustumEdge - offScreenOffset;
+                  const rightStartX = rightFrustumEdge + offScreenOffset;
+
+                  // Animate left text from left side
+                  if (shouldAnimateLeft) {
+                    leftTextMesh.position.x =
+                      leftStartX +
+                      (leftTextMesh.userData.targetX - leftStartX) *
+                        easedProgress;
+                    leftTextMesh.position.y = leftTextMesh.userData.targetY;
+                    leftTextMesh.position.z = leftTextMesh.userData.targetZ;
+                    // Animate scale from 0 to finalScale
+                    if (leftTextMesh.userData.finalScale !== undefined) {
+                      leftTextMesh.scale.setScalar(
+                        leftTextMesh.userData.finalScale * easedProgress
+                      );
+                    }
+                  }
+
+                  // Animate right text from right side
+                  if (shouldAnimateRight) {
+                    rightTextMesh.position.x =
+                      rightStartX +
+                      (rightTextMesh.userData.targetX - rightStartX) *
+                        easedProgress;
+                    rightTextMesh.position.y = rightTextMesh.userData.targetY;
+                    rightTextMesh.position.z = rightTextMesh.userData.targetZ;
+                    // Animate scale from 0 to finalScale
+                    if (rightTextMesh.userData.finalScale !== undefined) {
+                      rightTextMesh.scale.setScalar(
+                        rightTextMesh.userData.finalScale * easedProgress
+                      );
+                    }
+                  }
+                }
+              } else if (columnTexts.length >= 2 && scaleProgress === 0) {
+                // Keep side texts off-screen and hidden before scale down phase starts
+                const leftTextMesh = columnTexts[0];
+                const rightTextMesh = columnTexts[1];
+
+                // Store target positions if not already stored (from updateSizing)
+                if (
+                  leftTextMesh.userData.targetX === undefined &&
+                  leftTextMesh.userData.finalScale !== undefined
+                ) {
+                  leftTextMesh.userData.targetX = leftTextMesh.position.x;
+                  leftTextMesh.userData.targetY = leftTextMesh.position.y;
+                  leftTextMesh.userData.targetZ = leftTextMesh.position.z;
+                }
+                if (
+                  rightTextMesh.userData.targetX === undefined &&
+                  rightTextMesh.userData.finalScale !== undefined
+                ) {
+                  rightTextMesh.userData.targetX = rightTextMesh.position.x;
+                  rightTextMesh.userData.targetY = rightTextMesh.position.y;
+                  rightTextMesh.userData.targetZ = rightTextMesh.position.z;
+                }
+
+                // Calculate off-screen positions
+                const textZ =
+                  leftTextMesh.userData.targetZ || leftTextMesh.position.z || 0;
+                const aspect = camera.aspect;
+                const fov = camera.fov * (Math.PI / 180);
+                const heightAtDepth =
+                  2 * Math.tan(fov / 2) * Math.abs(camera.position.z - textZ);
+                const widthAtDepth = heightAtDepth * aspect;
+
+                const leftFrustumEdge = -widthAtDepth / 2;
+                const rightFrustumEdge = widthAtDepth / 2;
+                const offScreenOffset = 15;
+
+                if (
+                  leftTextMesh &&
+                  leftTextMesh.userData.targetX !== undefined
+                ) {
+                  leftTextMesh.position.x = leftFrustumEdge - offScreenOffset;
+                  leftTextMesh.position.y = leftTextMesh.userData.targetY || 0;
+                  leftTextMesh.position.z = leftTextMesh.userData.targetZ || 0;
+                  leftTextMesh.scale.setScalar(0); // Hide text
+                }
+                if (
+                  rightTextMesh &&
+                  rightTextMesh.userData.targetX !== undefined
+                ) {
+                  rightTextMesh.position.x = rightFrustumEdge + offScreenOffset;
+                  rightTextMesh.position.y =
+                    rightTextMesh.userData.targetY || 0;
+                  rightTextMesh.position.z =
+                    rightTextMesh.userData.targetZ || 0;
+                  rightTextMesh.scale.setScalar(0); // Hide text
+                }
+              }
+
               // Scale portals and spiral fade holes at beginning of step 3 (when text scale down starts)
               // Step 3 starts when scaleProgress > 0, which is when phase2Progress > 0.25
               // This means progress > 0.2 + 0.25 * 0.8 = 0.4
@@ -2808,6 +3075,39 @@ export function useDoorSceneSetup({
 
         ScrollTrigger.refresh();
         updateSizing();
+
+        // After updateSizing sets target positions, hide side texts initially
+        // They will animate in during scroll when scaleProgress > 0
+        if (columnTexts.length >= 2) {
+          const leftTextMesh = columnTexts[0];
+          const rightTextMesh = columnTexts[1];
+
+          // Calculate off-screen positions
+          const textZ =
+            leftTextMesh.userData.targetZ || leftTextMesh.position.z || 0;
+          const aspect = camera.aspect;
+          const fov = camera.fov * (Math.PI / 180);
+          const heightAtDepth =
+            2 * Math.tan(fov / 2) * Math.abs(camera.position.z - textZ);
+          const widthAtDepth = heightAtDepth * aspect;
+          const leftFrustumEdge = -widthAtDepth / 2;
+          const rightFrustumEdge = widthAtDepth / 2;
+          const offScreenOffset = 15;
+
+          // Position off-screen and scale to 0
+          if (leftTextMesh.userData.targetX !== undefined) {
+            leftTextMesh.position.x = leftFrustumEdge - offScreenOffset;
+            leftTextMesh.position.y = leftTextMesh.userData.targetY || 0;
+            leftTextMesh.position.z = leftTextMesh.userData.targetZ || 0;
+            leftTextMesh.scale.setScalar(0);
+          }
+          if (rightTextMesh.userData.targetX !== undefined) {
+            rightTextMesh.position.x = rightFrustumEdge + offScreenOffset;
+            rightTextMesh.position.y = rightTextMesh.userData.targetY || 0;
+            rightTextMesh.position.z = rightTextMesh.userData.targetZ || 0;
+            rightTextMesh.scale.setScalar(0);
+          }
+        }
       });
 
     animate();
