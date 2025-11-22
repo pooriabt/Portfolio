@@ -10,6 +10,8 @@ type WavyTextOptions = {
   size?: number;
   color?: string;
   onClick?: () => void;
+  distortionStrength?: number; // Controls vertex distortion (default: 0.04, lower = less wavy)
+  rippleIntensity?: number; // Controls ripple intensity in fragment shader (default: 0.2, lower = less ripple)
   spiralUniforms?: {
     uTime: { value: number };
     uResolution: { value: THREE.Vector2 };
@@ -32,6 +34,8 @@ export function createWavyText(options: WavyTextOptions): THREE.Mesh {
     size = 0.15,
     color = "#ffffff",
     onClick,
+    distortionStrength = 0.04,
+    rippleIntensity = 0.2,
     spiralUniforms,
   } = options;
 
@@ -64,8 +68,8 @@ export function createWavyText(options: WavyTextOptions): THREE.Mesh {
     uSpeed: spiralUniforms?.uSpeed || { value: 0.7 },
     uBands: spiralUniforms?.uBands || { value: 20.0 },
     uColor: { value: new THREE.Color(color) },
-    uDistortionStrength: { value: 0.04 }, // Increased for visible ripple effect
-    uRippleIntensity: { value: 0.2 }, // Decreased ripple intensity
+    uDistortionStrength: { value: distortionStrength }, // Controls vertex distortion
+    uRippleIntensity: { value: rippleIntensity }, // Controls ripple intensity
     uSurfaceColor: { value: new THREE.Color(0x00ffff) }, // Cyan surface color
   };
 

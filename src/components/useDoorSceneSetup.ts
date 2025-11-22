@@ -394,7 +394,9 @@ export function useDoorSceneSetup({
                 font: font,
                 position: { x: 0, y: -2, z: -8 }, // Will be positioned in updateSizing
                 size: 1.08, // Smaller size for body text (will be adjusted in updateSizing)
-                color: "#ffffff",
+                color: "#11edbd", // Change this to any hex color (e.g., "#ff5fa8", "#2d9cdb", "#00ff00")
+                distortionStrength: 0.015, // Lower value = less wavy distortion (default: 0.04)
+                rippleIntensity: 0.08, // Lower value = less ripple effect (default: 0.2)
                 spiralUniforms: {
                   uTime: spiralUniforms.uTime as { value: number },
                   uResolution: spiralUniforms.uResolution as {
@@ -416,7 +418,9 @@ export function useDoorSceneSetup({
                 font: font,
                 position: { x: 0, y: -2, z: -8 }, // Will be positioned in updateSizing
                 size: 0.08, // Smaller size for body text (will be adjusted in updateSizing)
-                color: "#ffffff",
+                color: "#11edbd", // Change this to any hex color (e.g., "#ff5fa8", "#2d9cdb", "#00ff00")
+                distortionStrength: 0.015, // Lower value = less wavy distortion (default: 0.04)
+                rippleIntensity: 0.08, // Lower value = less ripple effect (default: 0.2)
                 spiralUniforms: {
                   uTime: spiralUniforms.uTime as { value: number },
                   uResolution: spiralUniforms.uResolution as {
@@ -2067,7 +2071,7 @@ export function useDoorSceneSetup({
           rightOuterWidthWorldText
         );
 
-        const textY = -1.6; // Centered in the middle of y-axis
+        const textY = -1.4; // Increased from -1.6 to move texts higher (less negative = higher position)
 
         // Determine text size based on screen width
         // Text only renders at 900px and above, sharply disappears below 900px
@@ -2130,7 +2134,7 @@ export function useDoorSceneSetup({
           if (leftCurrentText !== leftWrappedText) {
             leftTextMesh.geometry.dispose();
             // Calculate line height (typically 1.2-1.5 times font size)
-            const lineHeight = columnTextSize * 1.3;
+            const lineHeight = columnTextSize * 1.5; // Increased from 1.3 to 1.5 for more spacing between lines
             const result = createJustifiedTextGeometry(
               leftWrappedText,
               columnTextFont,
@@ -2161,7 +2165,7 @@ export function useDoorSceneSetup({
               leftFirstLineFontSize <= 0
             ) {
               // Recalculate to get the first line font size
-              const lineHeight = columnTextSize * 1.3;
+              const lineHeight = columnTextSize * 1.5; // Increased from 1.3 to 1.5 for more spacing between lines
               const tempResult = createJustifiedTextGeometry(
                 leftWrappedText,
                 columnTextFont,
@@ -2186,7 +2190,7 @@ export function useDoorSceneSetup({
           if (shouldRecreateRightText) {
             rightTextMesh.geometry.dispose();
             // Calculate line height (typically 1.2-1.5 times font size)
-            const lineHeight = columnTextSize * 1.3;
+            const lineHeight = columnTextSize * 1.5; // Increased from 1.3 to 1.5 for more spacing between lines
 
             // Calculate font size for right text's first line to fill entire width
             let rightFirstLineFontSize: number | undefined = undefined;
@@ -2453,6 +2457,189 @@ export function useDoorSceneSetup({
       leftPortal.uniforms.uTime.value = elapsed;
       rightPortal.uniforms.uTime.value = elapsed * 1.05;
       if (spiral) spiral.update(elapsed);
+
+      // Update spiral background with side text positions for obstacle effect
+      if (spiral && columnTexts.length >= 2) {
+        const leftTextMesh = columnTexts[0];
+        const rightTextMesh = columnTexts[1];
+        const leftTextPos = new THREE.Vector2();
+        const rightTextPos = new THREE.Vector2();
+        const leftTextSize = new THREE.Vector2();
+        const rightTextSize = new THREE.Vector2();
+
+        // Helper function to calculate text center position and dimensions in screen UV space
+        // Uses the actual mesh position and bounding box to get accurate screen coordinates
+        const calculateTextBounds = (
+          mesh: THREE.Mesh
+        ): { center: THREE.Vector2; size: THREE.Vector2 } => {
+          if (!mesh.geometry) {
+            return {
+              center: new THREE.Vector2(-1.0, 0.5),
+              size: new THREE.Vector2(0, 0),
+            };
+          }
+
+          // Ensure bounding box is computed
+          if (!mesh.geometry.boundingBox) {
+            mesh.geometry.computeBoundingBox();
+          }
+
+          const bbox = mesh.geometry.boundingBox!;
+
+          // Ensure mesh matrixWorld is updated
+          mesh.updateMatrixWorld(true);
+
+          // Get the mesh's world position (like projectObjectToScreenUv does)
+          const meshWorldPos = new THREE.Vector3();
+          mesh.getWorldPosition(meshWorldPos);
+
+          // Project mesh position to screen UV (this is the reference point)
+          const meshScreenPos = meshWorldPos.clone();
+          meshScreenPos.project(camera);
+          const meshScreenUV = new THREE.Vector2(
+            0.5 * (meshScreenPos.x + 1.0),
+            0.5 * (1.0 - meshScreenPos.y)
+          );
+
+          // Use the center z of the bounding box (text depth)
+          const centerZ = (bbox.min.z + bbox.max.z) * 0.5;
+          const corners = [
+            new THREE.Vector3(bbox.min.x, bbox.min.y, centerZ),
+            new THREE.Vector3(bbox.max.x, bbox.min.y, centerZ),
+            new THREE.Vector3(bbox.min.x, bbox.max.y, centerZ),
+            new THREE.Vector3(bbox.max.x, bbox.max.y, centerZ),
+          ];
+
+          // Transform corners to world space using mesh's world matrix
+          const worldCorners = corners.map((corner) => {
+            const worldCorner = corner.clone();
+            worldCorner.applyMatrix4(mesh.matrixWorld);
+            return worldCorner;
+          });
+
+          // Project all corners to screen UV space
+          // IMPORTANT: Match the shader's coordinate system
+          // The shader uses: uv = gl_FragCoord.xy / uResolution
+          // gl_FragCoord has (0,0) at bottom-left, so uv has Y=0 at bottom, Y=1 at top
+          // Three.js project() gives NDC where y=-1 is top, y=1 is bottom
+          // So we need to flip Y to match gl_FragCoord: Y=0 at bottom, Y=1 at top
+          const screenCorners = worldCorners.map((corner) => {
+            const worldPos = corner.clone();
+            worldPos.project(camera);
+            // Convert from NDC (-1 to 1) to screen UV (0 to 1)
+            // NDC: x=-1 (left) to x=1 (right), y=-1 (top) to y=1 (bottom) in Three.js
+            // UV (gl_FragCoord): x=0 (left) to x=1 (right), y=0 (bottom) to y=1 (top)
+            // So: x = (ndc.x + 1) * 0.5, y = 1.0 - (ndc.y + 1) * 0.5 (FLIP Y!)
+            // Use the same formula as projectObjectToScreenUv for consistency
+            return new THREE.Vector2(
+              0.5 * (worldPos.x + 1.0),
+              0.5 * (1.0 - worldPos.y) // Same as projectObjectToScreenUv
+            );
+          });
+
+          // Find min/max in screen space
+          // This gives us the actual visual bounds of the text in screen space
+          let minX = screenCorners[0].x;
+          let maxX = screenCorners[0].x;
+          let minY = screenCorners[0].y;
+          let maxY = screenCorners[0].y;
+
+          screenCorners.forEach((corner) => {
+            minX = Math.min(minX, corner.x);
+            maxX = Math.max(maxX, corner.x);
+            minY = Math.min(minY, corner.y);
+            maxY = Math.max(maxY, corner.y);
+          });
+
+          // Calculate center from the min/max of projected corners
+          // This ensures the center matches the exact visual center in screen space
+          // accounting for any perspective distortion
+          const size = new THREE.Vector2(maxX - minX, maxY - minY);
+
+          // Calculate center from min/max of projected corners
+          // This gives us the visual center of the bounding box in screen space
+          const centerX = (minX + maxX) * 0.5;
+          const centerY = (minY + maxY) * 0.5;
+          const textHeight = maxY - minY;
+
+          // Calculate center - use the exact center from projected corners
+          // Note: In the shader, uv.y has Y=0 at bottom, Y=1 at top (from gl_FragCoord)
+          // But projectObjectToScreenUv flips Y, so we need to match that
+          // If obstacles appear above text, we need to DECREASE Y (move toward bottom)
+          // Since projectObjectToScreenUv: y = 0.5 * (1.0 - ndc.y), where ndc.y=-1 is bottom, ndc.y=1 is top
+          // This gives: bottom (ndc=-1) -> UV y=1, top (ndc=1) -> UV y=0
+          // So in the UV space from projectObjectToScreenUv: Y=0 is top, Y=1 is bottom
+          // But the shader uses gl_FragCoord which has Y=0 at bottom, Y=1 at top
+          // So there's a mismatch! We need to flip Y again to match the shader
+          const center = new THREE.Vector2(
+            centerX,
+            1.0 - centerY // Flip Y to match shader coordinate system (Y=0 at bottom, Y=1 at top)
+          );
+
+          return { center, size };
+        };
+
+        // Check if left text is visible and has a valid position
+        if (
+          leftTextMesh.userData.targetX !== undefined &&
+          leftTextMesh.scale.x > 0.01 &&
+          leftTextMesh.geometry
+        ) {
+          // Calculate center position and size from bounding box
+          const leftBounds = calculateTextBounds(leftTextMesh);
+
+          // Use the center calculated from projected corners (most accurate)
+          leftTextPos.copy(leftBounds.center);
+          leftTextSize.copy(leftBounds.size);
+        } else {
+          leftTextPos.set(-1.0, 0.5); // Hide obstacle
+          leftTextSize.set(0.0, 0.0);
+        }
+
+        // Check if right text is visible and has a valid position
+        if (
+          rightTextMesh.userData.targetX !== undefined &&
+          rightTextMesh.scale.x > 0.01 &&
+          rightTextMesh.geometry
+        ) {
+          // Calculate center position and size from bounding box
+          const rightBounds = calculateTextBounds(rightTextMesh);
+
+          // Use the center calculated from projected corners (most accurate)
+          rightTextPos.copy(rightBounds.center);
+          rightTextSize.copy(rightBounds.size);
+        } else {
+          rightTextPos.set(-1.0, 0.5); // Hide obstacle
+          rightTextSize.set(0.0, 0.0);
+        }
+
+        // Update spiral background with side text positions and actual dimensions
+        if (spiral.updateSideTextPositions) {
+          spiral.updateSideTextPositions(
+            leftTextPos.x >= 0 ? leftTextPos : null,
+            rightTextPos.x >= 0 ? rightTextPos : null,
+            leftTextSize.x > 0 && leftTextSize.y > 0 ? leftTextSize : null,
+            rightTextSize.x > 0 && rightTextSize.y > 0 ? rightTextSize : null
+          );
+        }
+
+        // Ensure edge angles are updated immediately whenever positions are updated
+        // This prevents delay between obstacle movement and text movement
+        // Edge angles are updated directly via uniforms, so we just need to ensure they're synced
+        if (spiral.material?.uniforms) {
+          // Force uniform update by accessing the values
+          // This ensures shader receives the latest values immediately
+          const uniforms = spiral.material.uniforms;
+          if (uniforms.uSideTextLeftTopAngle)
+            uniforms.uSideTextLeftTopAngle.value;
+          if (uniforms.uSideTextLeftBottomAngle)
+            uniforms.uSideTextLeftBottomAngle.value;
+          if (uniforms.uSideTextRightTopAngle)
+            uniforms.uSideTextRightTopAngle.value;
+          if (uniforms.uSideTextRightBottomAngle)
+            uniforms.uSideTextRightBottomAngle.value;
+        }
+      }
 
       // Update wavy text uniforms to sync with spiral
       wavyTexts.forEach((textMesh) => {

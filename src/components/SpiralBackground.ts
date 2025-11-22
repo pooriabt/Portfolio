@@ -63,6 +63,20 @@ export function createSpiralBackground(
     uArrowRestartHasStarted: { value: 0.0 },
     // Arrow animation visibility: 0 = hidden, 1 = visible
     uArrowAnimationVisible: { value: 0.0 },
+    // Side text obstacle positions (in screen UV space, 0-1)
+    uSideTextLeftPos: { value: new THREE.Vector2(-1.0, 0.5) }, // -1 means not visible
+    uSideTextRightPos: { value: new THREE.Vector2(-1.0, 0.5) }, // -1 means not visible
+    uSideTextLeftSize: { value: new THREE.Vector2(0.0, 0.0) }, // Width and height of left text in screen UV space
+    uSideTextRightSize: { value: new THREE.Vector2(0.0, 0.0) }, // Width and height of right text in screen UV space
+    uSideTextObstacleStrength: { value: 0.5 }, // How strong the obstacle effect is
+    // Edge angles in radians (0 = horizontal, positive = rotated counterclockwise)
+    uSideTextLeftTopAngle: { value: -0.21 }, // Top edge angle for left obstacle
+    uSideTextLeftBottomAngle: { value: 0.3 }, // Bottom edge angle for left obstacle
+    uSideTextRightTopAngle: { value: 0.0 }, // Top edge angle for right obstacle
+    uSideTextRightBottomAngle: { value: 0.0 }, // Bottom edge angle for right obstacle
+    // Obstacle rotation in radians (pivots at upper corner)
+    uSideTextLeftRotation: { value: -0.25 }, // Rotation for left obstacle (pivot: top-right corner)
+    uSideTextRightRotation: { value: 0.25 }, // Rotation for right obstacle (pivot: top-left corner)
   };
 
   // vertex shader (pass uv)
@@ -101,6 +115,20 @@ export function createSpiralBackground(
   uniform float uArrowRestartStartOffset;
   uniform float uArrowRestartHasStarted;
   uniform float uArrowAnimationVisible;
+  // Side text obstacle uniforms
+  uniform vec2 uSideTextLeftPos;
+  uniform vec2 uSideTextRightPos;
+  uniform vec2 uSideTextLeftSize; // Width and height in screen UV space
+  uniform vec2 uSideTextRightSize; // Width and height in screen UV space
+  uniform float uSideTextObstacleStrength;
+  // Edge angles in radians (0 = horizontal, positive = rotated counterclockwise)
+  uniform float uSideTextLeftTopAngle;
+  uniform float uSideTextLeftBottomAngle;
+  uniform float uSideTextRightTopAngle;
+  uniform float uSideTextRightBottomAngle;
+  // Obstacle rotation in radians (pivots at upper corner)
+  uniform float uSideTextLeftRotation;
+  uniform float uSideTextRightRotation;
 
   // Band shape helper (creates a single moving band centered at phase 'o')
   float bandAt(float o, float ss, float width) {
@@ -154,6 +182,280 @@ export function createSpiralBackground(
     float a1 = atan(p1.y, p1.x);
     float spiral1 = a1 + r1 * 6.0 - t * 0.7;
     float v1 = sin(spiral1 * uBands);
+    
+    // ===== Side text obstacle effect =====
+    // Create deflection/distortion when ripples encounter side texts
+    // This makes the spiral ripples "flow around" the text like encountering an obstacle
+    float obstacleDistortion0 = 0.0;
+    float obstacleDistortion1 = 0.0;
+    bool insideLeftObstacle = false;
+    bool insideRightObstacle = false;
+    
+    // Left text obstacle - "C" shape with controllable angled edges
+    if (uSideTextLeftPos.x >= 0.0 && uSideTextLeftSize.x > 0.001 && uSideTextLeftSize.y > 0.001) {
+      vec2 toLeftText = uv - uSideTextLeftPos;
+      
+      vec2 halfSize = uSideTextLeftSize * 0.5;
+      vec2 halfSizeAspect = vec2(halfSize.x * aspect, halfSize.y);
+      vec2 toLeftTextAspect = vec2(toLeftText.x * aspect, toLeftText.y);
+      
+      // Apply rotation around top-right corner (pivot point)
+      // Pivot in aspect-corrected space: (halfSizeAspect.x, halfSizeAspect.y)
+      float leftRotation = uSideTextLeftRotation;
+      if (abs(leftRotation) > 0.001) {
+        vec2 pivotAspect = vec2(halfSizeAspect.x, halfSizeAspect.y);
+        // Translate to pivot, rotate, translate back
+        vec2 relativeToPivot = toLeftTextAspect - pivotAspect;
+        float cosRot = cos(leftRotation);
+        float sinRot = sin(leftRotation);
+        vec2 rotated = vec2(
+          relativeToPivot.x * cosRot - relativeToPivot.y * sinRot,
+          relativeToPivot.x * sinRot + relativeToPivot.y * cosRot
+        );
+        toLeftTextAspect = rotated + pivotAspect;
+        // Update toLeftText for non-aspect calculations (used in inside checks)
+        toLeftText = vec2(toLeftTextAspect.x / aspect, toLeftTextAspect.y);
+      }
+      
+      // For left obstacle, exclude left edge (near screen edge)
+      // Only calculate distance to right, top, and bottom edges
+      // Right edge (vertical, at x = halfSize.x)
+      float distToRightEdge = toLeftTextAspect.x - halfSizeAspect.x;
+      
+      // Top edge (angled) - pivots at top-right corner (halfSize.x, halfSize.y)
+      // Edge equation: y = halfSize.y + tan(angle) * (x - halfSize.x)
+      // Edge is a straight line extending from pivot - no blending to avoid refraction
+      float topEdgePivotX = halfSizeAspect.x;
+      float topEdgePivotY = halfSizeAspect.y;
+      float topAngle = uSideTextLeftTopAngle;
+      float topEdgeSlope = tan(topAngle);
+      // Calculate Y position of edge at current X (straight line from pivot)
+      float topEdgeYAtX = topEdgePivotY + topEdgeSlope * (toLeftTextAspect.x - topEdgePivotX);
+      // Signed distance: positive = point is below edge (inside for top edge)
+      float distToTopEdge = topEdgeYAtX - toLeftTextAspect.y;
+      
+      // Bottom edge (angled) - pivots at bottom-right corner (halfSize.x, -halfSize.y)
+      // Edge equation: y = -halfSize.y + tan(angle) * (x - halfSize.x)
+      // Edge is a straight line extending from pivot - no blending to avoid refraction
+      float bottomEdgePivotX = halfSizeAspect.x;
+      float bottomEdgePivotY = -halfSizeAspect.y;
+      float bottomAngle = uSideTextLeftBottomAngle;
+      float bottomEdgeSlope = tan(bottomAngle);
+      // Calculate Y position of edge at current X (straight line from pivot)
+      float bottomEdgeYAtX = bottomEdgePivotY + bottomEdgeSlope * (toLeftTextAspect.x - bottomEdgePivotX);
+      // Signed distance: positive = point is above edge (inside for bottom edge)
+      float distToBottomEdge = toLeftTextAspect.y - bottomEdgeYAtX;
+      
+      // Use original SDF calculation - when angles are 0, this matches original parallel edges
+      // For parallel edges: abs(y) - halfSize.y gives distance to closest edge (positive = outside)
+      // For angled edges: need to calculate distance properly
+      // SDF expects: positive = outside, negative = inside
+      float distToVerticalEdges;
+      if (abs(uSideTextLeftTopAngle) < 0.001 && abs(uSideTextLeftBottomAngle) < 0.001) {
+        // Original parallel edges logic
+        distToVerticalEdges = abs(toLeftTextAspect.y) - halfSizeAspect.y;
+      } else {
+        // Angled edges: calculate distance to closest edge
+        // distToTopEdge: positive = below edge (inside), negative = above edge (outside)
+        // distToBottomEdge: positive = above edge (inside), negative = below edge (outside)
+        // For SDF: we need positive = outside, so we need the minimum of the negative distances
+        // Or equivalently: -max(-distToTopEdge, -distToBottomEdge) = min(distToTopEdge, distToBottomEdge)
+        // But wait, we need the distance to the closest edge, considering both are boundaries
+        // If both are positive (inside both), we're inside, so distance should be negative
+        // If one is negative (outside that edge), we're outside, so distance should be positive
+        // The distance to the shape is the minimum of the distances to each edge
+        // Since distToTopEdge and distToBottomEdge are signed (positive = inside), we need:
+        float distInsideTop = distToTopEdge; // positive = inside
+        float distInsideBottom = distToBottomEdge; // positive = inside
+        // Distance to shape: if inside both, use negative of the minimum (closest to edge)
+        // If outside either, use positive distance
+        if (distInsideTop > 0.0 && distInsideBottom > 0.0) {
+          // Inside both edges - distance is negative (inside the shape)
+          distToVerticalEdges = -min(distInsideTop, distInsideBottom);
+        } else if (distInsideTop < 0.0 && distInsideBottom < 0.0) {
+          // Outside both edges - distance is positive (outside the shape)
+          distToVerticalEdges = -max(distInsideTop, distInsideBottom);
+        } else {
+          // Outside one edge, inside the other - we're outside the shape
+          distToVerticalEdges = max(-distInsideTop, -distInsideBottom);
+        }
+      }
+      
+      vec2 distToEdgeLeft = vec2(
+        distToRightEdge,  // Distance to right edge only (positive means outside)
+        distToVerticalEdges  // Distance to closest top/bottom edge
+      );
+      float distToRect = length(max(distToEdgeLeft, 0.0)) + min(max(distToEdgeLeft.x, distToEdgeLeft.y), 0.0);
+      
+      // Check if inside the obstacle - exclude left edge (near screen edge)
+      // Use original check logic
+      bool insideByX = toLeftText.x < halfSize.x && toLeftText.x > -halfSize.x * 0.01;
+      bool insideByY;
+      if (abs(uSideTextLeftTopAngle) < 0.001 && abs(uSideTextLeftBottomAngle) < 0.001) {
+        // Original parallel edges check
+        insideByY = abs(toLeftText.y) < halfSize.y;
+      } else {
+        // Angled edges check
+        insideByY = distToTopEdge > 0.0 && distToBottomEdge > 0.0;
+      }
+      insideLeftObstacle = insideByX && insideByY;
+      
+      // Create smooth falloff - stronger near text, fades with distance
+      float influenceRadius = max(halfSizeAspect.x, halfSizeAspect.y) * 2.5; // Extend influence beyond text
+      float leftObstacleInfluence = 1.0 - smoothstep(0.0, influenceRadius, distToRect);
+      leftObstacleInfluence *= uSideTextObstacleStrength;
+      
+      if (leftObstacleInfluence > 0.01) {
+        // Create deflection: push ripples away from text edges
+        // The deflection creates a "flow around" effect
+        float angleToLeftText = atan(toLeftTextAspect.y, toLeftTextAspect.x);
+        // Calculate normalized distance from text center
+        float distFromLeftText = distToRect / max(max(halfSizeAspect.x, halfSizeAspect.y), 0.01);
+        // Create radial deflection - stronger closer to text, pushes spirals outward
+        float radialDeflection = leftObstacleInfluence * 0.4 * (1.0 / max(distFromLeftText, 0.15));
+        // Angular component creates the "flow around" effect
+        float angularDeflection = sin(angleToLeftText * 2.0 + t * 0.5) * 0.2;
+        obstacleDistortion0 = radialDeflection + angularDeflection * leftObstacleInfluence;
+      }
+      
+    }
+    
+    // Right text obstacle - "C" shape with controllable angled edges
+    if (uSideTextRightPos.x >= 0.0 && uSideTextRightSize.x > 0.001 && uSideTextRightSize.y > 0.001) {
+      vec2 toRightText = uv - uSideTextRightPos;
+      
+      vec2 halfSize = uSideTextRightSize * 0.5;
+      vec2 halfSizeAspect = vec2(halfSize.x * aspect, halfSize.y);
+      vec2 toRightTextAspect = vec2(toRightText.x * aspect, toRightText.y);
+      
+      // Apply rotation around top-left corner (pivot point)
+      // Pivot in aspect-corrected space: (-halfSizeAspect.x, halfSizeAspect.y)
+      float rightRotation = uSideTextRightRotation;
+      if (abs(rightRotation) > 0.001) {
+        vec2 pivotAspect = vec2(-halfSizeAspect.x, halfSizeAspect.y);
+        // Translate to pivot, rotate, translate back
+        vec2 relativeToPivot = toRightTextAspect - pivotAspect;
+        float cosRot = cos(rightRotation);
+        float sinRot = sin(rightRotation);
+        vec2 rotated = vec2(
+          relativeToPivot.x * cosRot - relativeToPivot.y * sinRot,
+          relativeToPivot.x * sinRot + relativeToPivot.y * cosRot
+        );
+        toRightTextAspect = rotated + pivotAspect;
+        // Update toRightText for non-aspect calculations (used in inside checks)
+        toRightText = vec2(toRightTextAspect.x / aspect, toRightTextAspect.y);
+      }
+      
+      // For right obstacle, exclude right edge (near screen edge)
+      // Only calculate distance to left, top, and bottom edges
+      // Left edge (vertical, at x = -halfSize.x)
+      float distToLeftEdge = -toRightTextAspect.x - halfSizeAspect.x;
+      
+      // Top edge (angled) - pivots at top-left corner (-halfSize.x, halfSize.y)
+      // Edge equation: y = halfSize.y + tan(angle) * (x - (-halfSize.x))
+      // Edge is a straight line extending from pivot - no blending to avoid refraction
+      float topEdgePivotX = -halfSizeAspect.x;
+      float topEdgePivotY = halfSizeAspect.y;
+      float topAngle = uSideTextRightTopAngle;
+      float topEdgeSlope = tan(topAngle);
+      // Calculate Y position of edge at current X (straight line from pivot)
+      float topEdgeYAtX = topEdgePivotY + topEdgeSlope * (toRightTextAspect.x - topEdgePivotX);
+      // Signed distance: positive = point is below edge (inside for top edge)
+      float distToTopEdge = topEdgeYAtX - toRightTextAspect.y;
+      
+      // Bottom edge (angled) - pivots at bottom-left corner (-halfSize.x, -halfSize.y)
+      // Edge equation: y = -halfSize.y + tan(angle) * (x - (-halfSize.x))
+      // Edge is a straight line extending from pivot - no blending to avoid refraction
+      float bottomEdgePivotX = -halfSizeAspect.x;
+      float bottomEdgePivotY = -halfSizeAspect.y;
+      float bottomAngle = uSideTextRightBottomAngle;
+      float bottomEdgeSlope = tan(bottomAngle);
+      // Calculate Y position of edge at current X (straight line from pivot)
+      float bottomEdgeYAtX = bottomEdgePivotY + bottomEdgeSlope * (toRightTextAspect.x - bottomEdgePivotX);
+      // Signed distance: positive = point is above edge (inside for bottom edge)
+      float distToBottomEdge = toRightTextAspect.y - bottomEdgeYAtX;
+      
+      // Use original SDF calculation - when angles are 0, this matches original parallel edges
+      // For parallel edges: abs(y) - halfSize.y gives distance to closest edge (positive = outside)
+      // For angled edges: need to calculate distance properly
+      // SDF expects: positive = outside, negative = inside
+      float distToVerticalEdges;
+      if (abs(uSideTextRightTopAngle) < 0.001 && abs(uSideTextRightBottomAngle) < 0.001) {
+        // Original parallel edges logic
+        distToVerticalEdges = abs(toRightTextAspect.y) - halfSizeAspect.y;
+      } else {
+        // Angled edges: calculate distance to closest edge
+        // distToTopEdge: positive = below edge (inside), negative = above edge (outside)
+        // distToBottomEdge: positive = above edge (inside), negative = below edge (outside)
+        float distInsideTop = distToTopEdge; // positive = inside
+        float distInsideBottom = distToBottomEdge; // positive = inside
+        // Distance to shape: if inside both, use negative of the minimum (closest to edge)
+        // If outside either, use positive distance
+        if (distInsideTop > 0.0 && distInsideBottom > 0.0) {
+          // Inside both edges - distance is negative (inside the shape)
+          distToVerticalEdges = -min(distInsideTop, distInsideBottom);
+        } else if (distInsideTop < 0.0 && distInsideBottom < 0.0) {
+          // Outside both edges - distance is positive (outside the shape)
+          distToVerticalEdges = -max(distInsideTop, distInsideBottom);
+        } else {
+          // Outside one edge, inside the other - we're outside the shape
+          distToVerticalEdges = max(-distInsideTop, -distInsideBottom);
+        }
+      }
+      
+      vec2 distToEdgeRight = vec2(
+        distToLeftEdge,  // Distance to left edge only (positive means outside)
+        distToVerticalEdges  // Distance to closest top/bottom edge
+      );
+      float distToRect = length(max(distToEdgeRight, 0.0)) + min(max(distToEdgeRight.x, distToEdgeRight.y), 0.0);
+      
+      // Check if inside the obstacle - exclude right edge (near screen edge)
+      // For angled edges, we need to ensure we're within the X bounds where edges are valid
+      // Edges extend from pivot (x = -halfSize.x) to right edge (x = halfSize.x)
+      bool insideByX = toRightText.x > -halfSize.x && toRightText.x < halfSize.x * 0.01;
+      bool insideByY;
+      if (abs(uSideTextRightTopAngle) < 0.001 && abs(uSideTextRightBottomAngle) < 0.001) {
+        // Original parallel edges check
+        insideByY = abs(toRightText.y) < halfSize.y;
+      } else {
+        // Angled edges check - only check if within X bounds where edges exist
+        // Edges are straight lines from pivot, so check distance to those lines
+        if (insideByX) {
+          insideByY = distToTopEdge > 0.0 && distToBottomEdge > 0.0;
+        } else {
+          // Outside X bounds - not inside obstacle
+          insideByY = false;
+        }
+      }
+      insideRightObstacle = insideByX && insideByY;
+      
+      // Create smooth falloff - stronger near text, fades with distance
+      float influenceRadius = max(halfSizeAspect.x, halfSizeAspect.y) * 2.5; // Extend influence beyond text
+      float rightObstacleInfluence = 1.0 - smoothstep(0.0, influenceRadius, distToRect);
+      rightObstacleInfluence *= uSideTextObstacleStrength;
+      
+      if (rightObstacleInfluence > 0.01) {
+        // Create deflection: push ripples away from text edges
+        // The deflection creates a "flow around" effect
+        float angleToRightText = atan(toRightTextAspect.y, toRightTextAspect.x);
+        // Calculate normalized distance from text center
+        float distFromRightText = distToRect / max(max(halfSizeAspect.x, halfSizeAspect.y), 0.01);
+        // Create radial deflection - stronger closer to text, pushes spirals outward
+        float radialDeflection = rightObstacleInfluence * 0.4 * (1.0 / max(distFromRightText, 0.15));
+        // Angular component creates the "flow around" effect
+        float angularDeflection = sin(angleToRightText * 2.0 + t * 0.5) * 0.2;
+        obstacleDistortion1 = radialDeflection + angularDeflection * rightObstacleInfluence;
+      }
+      
+    }
+    
+    // Apply obstacle distortion to spiral calculations
+    // This creates the "encountering an obstacle" effect - ripples deflect around the text
+    spiral0 += obstacleDistortion0;
+    spiral1 += obstacleDistortion1;
+    // Recalculate spiral values with distortion
+    v0 = sin(spiral0 * uBands);
+    v1 = sin(spiral1 * uBands);
     
     // Smoothly blend between spirals based on distance (smooth boundary)
     float d0 = distance(uv, uCenter0);
@@ -423,6 +725,7 @@ export function createSpiralBackground(
 
     // Apply teal color to white spaces found along line paths
     color = mix(color, uGradientColor, colorIntensity);
+    
 
     gl_FragColor = vec4(color, alpha);
   }
@@ -557,7 +860,7 @@ export function createSpiralBackground(
       // Immediately stop the animation loop
       restartTimeOffset = 0.0;
       hasStartedRestartAnimation = false;
-      
+
       // Fade out arrow if visible
       if (uniforms.uArrowAnimationVisible.value > 0.01) {
         if (arrowVisibilityTween && arrowVisibilityTween.isActive()) {
@@ -569,14 +872,14 @@ export function createSpiralBackground(
           ease: "power1.out",
         });
       }
-      
+
       // Stop restart animation
       if (arrowRestartTween && arrowRestartTween.isActive()) {
         arrowRestartTween.kill();
       }
       uniforms.uArrowAnimationRestart.value = 0.0;
     }
-    // If 5 seconds have passed since page load and no scroll in last 5 seconds, 
+    // If 5 seconds have passed since page load and no scroll in last 5 seconds,
     // and we're NOT at the bottom, show and start restart animation
     else if (timeSinceLoad >= 5.0 && timeSinceScroll >= 5.0 && !isScrolling) {
       // Fade in visibility if not already visible
@@ -643,7 +946,7 @@ export function createSpiralBackground(
         arrowVisibilityTween.kill();
       }
       uniforms.uArrowAnimationVisible.value = 0.0;
-      
+
       if (arrowRestartTween && arrowRestartTween.isActive()) {
         arrowRestartTween.kill();
       }
@@ -712,11 +1015,75 @@ export function createSpiralBackground(
   // initial resize
   resize();
 
+  // Method to update side text positions for obstacle effect
+  function updateSideTextPositions(
+    leftPos: THREE.Vector2 | null,
+    rightPos: THREE.Vector2 | null,
+    leftSize: THREE.Vector2 | null = null,
+    rightSize: THREE.Vector2 | null = null
+  ) {
+    if (leftPos && leftSize) {
+      uniforms.uSideTextLeftPos.value.copy(leftPos);
+      uniforms.uSideTextLeftSize.value.copy(leftSize);
+    } else {
+      // Hide left text obstacle
+      uniforms.uSideTextLeftPos.value.set(-1.0, 0.5);
+      uniforms.uSideTextLeftSize.value.set(0.0, 0.0);
+    }
+
+    if (rightPos && rightSize) {
+      uniforms.uSideTextRightPos.value.copy(rightPos);
+      uniforms.uSideTextRightSize.value.copy(rightSize);
+    } else {
+      // Hide right text obstacle
+      uniforms.uSideTextRightPos.value.set(-1.0, 0.5);
+      uniforms.uSideTextRightSize.value.set(0.0, 0.0);
+    }
+  }
+
+  // Method to update edge angles immediately (no animation delay)
+  function updateEdgeAngles(
+    leftTopAngle?: number,
+    leftBottomAngle?: number,
+    rightTopAngle?: number,
+    rightBottomAngle?: number
+  ) {
+    if (leftTopAngle !== undefined) {
+      uniforms.uSideTextLeftTopAngle.value = leftTopAngle;
+    }
+    if (leftBottomAngle !== undefined) {
+      uniforms.uSideTextLeftBottomAngle.value = leftBottomAngle;
+    }
+    if (rightTopAngle !== undefined) {
+      uniforms.uSideTextRightTopAngle.value = rightTopAngle;
+    }
+    if (rightBottomAngle !== undefined) {
+      uniforms.uSideTextRightBottomAngle.value = rightBottomAngle;
+    }
+  }
+
+  // Method to update obstacle rotation immediately (no animation delay)
+  function updateObstacleRotation(
+    leftRotation?: number,
+    rightRotation?: number
+  ) {
+    if (leftRotation !== undefined) {
+      uniforms.uSideTextLeftRotation.value = leftRotation;
+    }
+    if (rightRotation !== undefined) {
+      uniforms.uSideTextRightRotation.value = rightRotation;
+    }
+  }
+
   return {
     mesh: plane,
     update,
     resize,
     dispose,
     material: mat,
+    updateSideTextPositions,
+    updateEdgeAngles,
+    updateObstacleRotation,
+    uniforms, // Expose uniforms for direct access if needed
   };
 }
