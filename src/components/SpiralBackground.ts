@@ -192,10 +192,14 @@ export function createSpiralBackground(
     bool insideRightObstacle = false;
     
     // Left text obstacle - "C" shape with controllable angled edges
+    // uSideTextLeftPos is now the RIGHT EDGE position (not center) for early appearance
+    // Check if right edge is on-screen (>= 0) to show obstacle as soon as visible edge enters screen
     if (uSideTextLeftPos.x >= 0.0 && uSideTextLeftSize.x > 0.001 && uSideTextLeftSize.y > 0.001) {
-      vec2 toLeftText = uv - uSideTextLeftPos;
-      
       vec2 halfSize = uSideTextLeftSize * 0.5;
+      // Convert right edge position to center for calculations
+      // Center is at right edge - halfSize.x (to the left)
+      vec2 centerPos = vec2(uSideTextLeftPos.x - halfSize.x, uSideTextLeftPos.y);
+      vec2 toLeftText = uv - centerPos;
       vec2 halfSizeAspect = vec2(halfSize.x * aspect, halfSize.y);
       vec2 toLeftTextAspect = vec2(toLeftText.x * aspect, toLeftText.y);
       
@@ -321,10 +325,14 @@ export function createSpiralBackground(
     }
     
     // Right text obstacle - "C" shape with controllable angled edges
+    // uSideTextRightPos is now the LEFT EDGE position (not center) for early appearance
+    // Check if left edge is on-screen (>= 0) to show obstacle as soon as visible edge enters screen
     if (uSideTextRightPos.x >= 0.0 && uSideTextRightSize.x > 0.001 && uSideTextRightSize.y > 0.001) {
-      vec2 toRightText = uv - uSideTextRightPos;
-      
       vec2 halfSize = uSideTextRightSize * 0.5;
+      // Convert left edge position to center for calculations
+      // Center is at left edge + halfSize.x (to the right)
+      vec2 centerPos = vec2(uSideTextRightPos.x + halfSize.x, uSideTextRightPos.y);
+      vec2 toRightText = uv - centerPos;
       vec2 halfSizeAspect = vec2(halfSize.x * aspect, halfSize.y);
       vec2 toRightTextAspect = vec2(toRightText.x * aspect, toRightText.y);
       

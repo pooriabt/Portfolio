@@ -2580,34 +2580,63 @@ export function useDoorSceneSetup({
         };
 
         // Check if left text is visible and has a valid position
+        // Show obstacle immediately when text starts animating (scale > 0)
+        // This ensures obstacle appears at the exact same time as text, matching the timeline
         if (
           leftTextMesh.userData.targetX !== undefined &&
-          leftTextMesh.scale.x > 0.01 &&
+          leftTextMesh.scale.x > 0 &&
           leftTextMesh.geometry
         ) {
           // Calculate center position and size from bounding box
           const leftBounds = calculateTextBounds(leftTextMesh);
 
-          // Use the center calculated from projected corners (most accurate)
-          leftTextPos.copy(leftBounds.center);
-          leftTextSize.copy(leftBounds.size);
+          // Ensure size is valid (non-zero) before using it
+          if (leftBounds.size.x > 0 && leftBounds.size.y > 0) {
+            // For left obstacle: Pass the RIGHT EDGE position instead of center
+            // The shader will use this as the reference point (treating it as "center" for calculations)
+            // This ensures the obstacle appears as soon as the right edge (visible edge) enters the screen
+            // Right edge in screen UV: center.x + size.x/2
+            const rightEdgeX = leftBounds.center.x + leftBounds.size.x * 0.5;
+            // Pass right edge position - the shader uses this as the reference and calculates
+            // the obstacle shape relative to this point (which aligns with the right edge of text)
+            leftTextPos.set(rightEdgeX, leftBounds.center.y);
+            leftTextSize.copy(leftBounds.size);
+          } else {
+            // If bounds are invalid (zero size), hide obstacle
+            leftTextPos.set(-1.0, 0.5);
+            leftTextSize.set(0.0, 0.0);
+          }
         } else {
           leftTextPos.set(-1.0, 0.5); // Hide obstacle
           leftTextSize.set(0.0, 0.0);
         }
 
         // Check if right text is visible and has a valid position
+        // Show obstacle immediately when text starts animating (scale > 0)
+        // This ensures obstacle appears at the exact same time as text, matching the timeline
         if (
           rightTextMesh.userData.targetX !== undefined &&
-          rightTextMesh.scale.x > 0.01 &&
+          rightTextMesh.scale.x > 0 &&
           rightTextMesh.geometry
         ) {
           // Calculate center position and size from bounding box
           const rightBounds = calculateTextBounds(rightTextMesh);
 
-          // Use the center calculated from projected corners (most accurate)
-          rightTextPos.copy(rightBounds.center);
-          rightTextSize.copy(rightBounds.size);
+          // Ensure size is valid (non-zero) before using it
+          if (rightBounds.size.x > 0 && rightBounds.size.y > 0) {
+            // For right obstacle: Pass the LEFT EDGE position instead of center
+            // This ensures the obstacle appears as soon as the left edge (visible edge) enters the screen
+            // Left edge in screen UV: center.x - size.x/2
+            const leftEdgeX = rightBounds.center.x - rightBounds.size.x * 0.5;
+            // Pass left edge position - the shader uses this as the reference and calculates
+            // the obstacle shape relative to this point (which aligns with the left edge of text)
+            rightTextPos.set(leftEdgeX, rightBounds.center.y);
+            rightTextSize.copy(rightBounds.size);
+          } else {
+            // If bounds are invalid (zero size), hide obstacle
+            rightTextPos.set(-1.0, 0.5);
+            rightTextSize.set(0.0, 0.0);
+          }
         } else {
           rightTextPos.set(-1.0, 0.5); // Hide obstacle
           rightTextSize.set(0.0, 0.0);
@@ -2942,7 +2971,7 @@ export function useDoorSceneSetup({
             start: "top top",
             end: () =>
               `+=${
-                Math.max(mount.clientHeight, window.innerHeight || 1000) * 4
+                Math.max(mount.clientHeight, window.innerHeight || 1000) * 6
               }`,
             scrub: true,
             pin: true,
@@ -3052,11 +3081,21 @@ export function useDoorSceneSetup({
               }
 
               // ============================================
-              // STEP 4: Side texts animation (synchronized with scale down)
+              // STEP 4: Side texts animation (starts when rotation ends, longer duration)
               // ============================================
-              // Side texts animate in during the same timeline as farsi/english texts scale down
-              // scaleProgress starts at progress 0.4 and goes from 0 to 1 as progress goes from 0.4 to 1.0
-              if (columnTexts.length >= 2 && scaleProgress > 0) {
+              // Side texts start animating as soon as rotation ends (progress 0.4)
+              // Make the duration longer by using a slower progress calculation
+              // Calculate side text progress separately - starts at 0.4, slower progression to reach 1.0
+              const sideTextStartProgress = 0.4; // When rotation ends
+              const sideTextProgressRaw = progress >= sideTextStartProgress
+                ? (progress - sideTextStartProgress) / (1.0 - sideTextStartProgress)
+                : 0;
+              // Apply a power function to slow down the progress (makes it take longer to reach full value)
+              // Using a lower power (like 0.7) makes it progress slower but still reaches 1.0
+              const sideTextDurationStretch = 0.7; // Lower = slower progression (0.7 means ~43% slower in middle)
+              const sideTextProgress = Math.pow(Math.min(sideTextProgressRaw, 1.0), sideTextDurationStretch);
+              
+              if (columnTexts.length >= 2 && sideTextProgress > 0) {
                 const leftTextMesh = columnTexts[0];
                 const rightTextMesh = columnTexts[1];
 
@@ -3067,10 +3106,7 @@ export function useDoorSceneSetup({
                   rightTextMesh.userData.targetX !== undefined;
 
                 if (shouldAnimateLeft || shouldAnimateRight) {
-                  // Use scaleProgress directly - it goes from 0 to 1 during the scale down phase
-                  // This synchronizes side text animation with farsi/english text scale down
-                  const sideTextProgress = scaleProgress;
-                  // Use easing for smooth animation
+                  // Use easing for smooth animation (already has slower progression from power function)
                   const easedProgress =
                     sideTextProgress *
                     sideTextProgress *
