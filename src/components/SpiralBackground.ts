@@ -75,7 +75,7 @@ export function createSpiralBackground(
     uSideTextRightTopAngle: { value: 0.0 }, // Top edge angle for right obstacle
     uSideTextRightBottomAngle: { value: 0.0 }, // Bottom edge angle for right obstacle
     // Obstacle rotation in radians (pivots at upper corner)
-    uSideTextLeftRotation: { value: -0.25 }, // Rotation for left obstacle (pivot: top-right corner)
+    uSideTextLeftRotation: { value: -0.2 }, // Rotation for left obstacle (pivot: top-right corner)
     uSideTextRightRotation: { value: 0.25 }, // Rotation for right obstacle (pivot: top-left corner)
   };
 
