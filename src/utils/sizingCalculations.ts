@@ -821,8 +821,10 @@ export function updateSizing(params: UpdateSizingParams) {
       const finalLeftTextWidth = leftTextBaseWidth * finalLeftTextScale;
       const finalRightTextWidth = rightTextBaseWidth * finalRightTextScale;
 
-      const leftTextX = leftTextMinX;
-      const rightTextX = rightTextMinX;
+      // Convert UV offset (0.02) to world coordinates
+      const uvOffsetWorld = 0.02 * frustumWidthAtText;
+      const leftTextX = leftTextMinX - uvOffsetWorld;
+      const rightTextX = rightTextMinX + uvOffsetWorld;
 
       leftTextMesh.position.set(leftTextX, textY, textZ);
       leftTextMesh.scale.setScalar(finalLeftTextScale);

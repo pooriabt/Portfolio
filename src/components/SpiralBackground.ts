@@ -70,13 +70,32 @@ export function createSpiralBackground(
     uSideTextRightSize: { value: new THREE.Vector2(0.0, 0.0) }, // Width and height of right text in screen UV space
     uSideTextObstacleStrength: { value: 0.5 }, // How strong the obstacle effect is
     // Edge angles in radians (0 = horizontal, positive = rotated counterclockwise)
-    uSideTextLeftTopAngle: { value: -0.21 }, // Top edge angle for left obstacle
-    uSideTextLeftBottomAngle: { value: 0.3 }, // Bottom edge angle for left obstacle
-    uSideTextRightTopAngle: { value: 0.0 }, // Top edge angle for right obstacle
-    uSideTextRightBottomAngle: { value: 0.0 }, // Bottom edge angle for right obstacle
+    uSideTextLeftTopAngle: { value: -0.25 }, // Top edge angle for left obstacle
+    uSideTextLeftBottomAngle: { value: -0.1 }, // Bottom edge angle for left obstacle
+    uSideTextRightTopAngle: { value: 0.25 }, // Top edge angle for right obstacle
+    uSideTextRightBottomAngle: { value: 0.1 }, // Bottom edge angle for right obstacle
     // Obstacle rotation in radians (pivots at upper corner)
     uSideTextLeftRotation: { value: -0.2 }, // Rotation for left obstacle (pivot: top-right corner)
-    uSideTextRightRotation: { value: 0.25 }, // Rotation for right obstacle (pivot: top-left corner)
+    uSideTextRightRotation: { value: 0.2 }, // Rotation for right obstacle (pivot: top-left corner)
+    // Trapezoid corners for color modification (in UV space)
+    uTrapezoidCorner0: { value: new THREE.Vector2(0.0, 0.0) }, // Top-right
+    uTrapezoidCorner1: { value: new THREE.Vector2(0.0, 0.0) }, // Top-left
+    uTrapezoidCorner2: { value: new THREE.Vector2(0.0, 0.0) }, // Bottom-left
+    uTrapezoidCorner3: { value: new THREE.Vector2(0.0, 0.0) }, // Bottom-right
+    uTrapezoidColor: { value: new THREE.Color(0x00ff00) }, // Color for ripples inside trapezoid (green by default)
+    uTrapezoidActive: { value: 0.0 }, // 0 = inactive, 1 = active
+
+    // Left obstacle corner offsets (as percentage of size)
+    // Top corners
+    uSideTextLeftTopRightCornerOffsetX: { value: 0.06 }, // Move top-right corner right (as percentage of width)
+    uSideTextLeftTopRightCornerOffsetY: { value: 0.16 }, // Move top-right corner up (as percentage of height)
+    uSideTextLeftTopLeftCornerOffsetX: { value: -1.0 }, // Move top-left corner right (as percentage of width)
+    uSideTextLeftTopLeftCornerOffsetY: { value: -0.04 }, // Move top-left corner up (as percentage of height)
+    // Bottom corners
+    uSideTextLeftBottomRightCornerOffsetX: { value: 0.39 }, // Move bottom-right corner right (as percentage of width)
+    uSideTextLeftBottomRightCornerOffsetY: { value: -0.1 }, // Move bottom-right corner up (as percentage of height)
+    uSideTextLeftBottomLeftCornerOffsetX: { value: -1.0 }, // Move bottom-left corner right (as percentage of width)
+    uSideTextLeftBottomLeftCornerOffsetY: { value: -1.4 }, // Move bottom-left corner up (as percentage of height)
   };
 
   // vertex shader (pass uv)
@@ -129,6 +148,13 @@ export function createSpiralBackground(
   // Obstacle rotation in radians (pivots at upper corner)
   uniform float uSideTextLeftRotation;
   uniform float uSideTextRightRotation;
+  // Trapezoid corners for color modification
+  uniform vec2 uTrapezoidCorner0; // Top-right
+  uniform vec2 uTrapezoidCorner1; // Top-left
+  uniform vec2 uTrapezoidCorner2; // Bottom-left
+  uniform vec2 uTrapezoidCorner3; // Bottom-right
+  uniform vec3 uTrapezoidColor; // Color for ripples inside trapezoid
+  uniform float uTrapezoidActive; // 0 = inactive, 1 = active
 
   // Band shape helper (creates a single moving band centered at phase 'o')
   float bandAt(float o, float ss, float width) {
@@ -160,6 +186,38 @@ export function createSpiralBackground(
     vec2 ba = b - a;
     float t = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0);
     return t;
+  }
+  
+  // Check if point is inside a quadrilateral using cross product method
+  // Returns 1.0 if inside, 0.0 if outside
+  float pointInQuad(vec2 p, vec2 a, vec2 b, vec2 c, vec2 d) {
+    // Check if point is on the same side of all edges
+    // Edge AB
+    vec2 ab = b - a;
+    vec2 ap = p - a;
+    float crossAB = ab.x * ap.y - ab.y * ap.x;
+    
+    // Edge BC
+    vec2 bc = c - b;
+    vec2 bp = p - b;
+    float crossBC = bc.x * bp.y - bc.y * bp.x;
+    
+    // Edge CD
+    vec2 cd = d - c;
+    vec2 cp = p - c;
+    float crossCD = cd.x * cp.y - cd.y * cp.x;
+    
+    // Edge DA
+    vec2 da = a - d;
+    vec2 dp = p - d;
+    float crossDA = da.x * dp.y - da.y * dp.x;
+    
+    // All cross products should have the same sign (all positive or all negative)
+    // Check if all are positive or all are negative
+    bool allPositive = crossAB >= 0.0 && crossBC >= 0.0 && crossCD >= 0.0 && crossDA >= 0.0;
+    bool allNegative = crossAB <= 0.0 && crossBC <= 0.0 && crossCD <= 0.0 && crossDA <= 0.0;
+    
+    return (allPositive || allNegative) ? 1.0 : 0.0;
   }
 
   void main() {
@@ -510,6 +568,24 @@ export function createSpiralBackground(
 
     // base b/w spiral color
     vec3 color = mix(vec3(0.0), vec3(1.0), band);
+    
+    // ===== Check if inside trapezoid and modify color =====
+    if (uTrapezoidActive > 0.5) {
+      float insideTrapezoid = pointInQuad(
+        uv,
+        uTrapezoidCorner0, // Top-right
+        uTrapezoidCorner1, // Top-left
+        uTrapezoidCorner2, // Bottom-left
+        uTrapezoidCorner3  // Bottom-right
+      );
+      
+      if (insideTrapezoid > 0.5) {
+        // Inside trapezoid - modify ripple colors
+        // Apply trapezoid color to the ripples (white bands)
+        float rippleMask = smoothstep(0.3, 0.9, band); // Mask for ripple areas
+        color = mix(color, uTrapezoidColor, rippleMask * 0.8); // Blend with trapezoid color
+      }
+    }
 
     // ===== Gradient overlay only on white bands, triangular region, animated downward =====
     // Determine "white band" mask (apply on bright parts only)
@@ -733,7 +809,6 @@ export function createSpiralBackground(
 
     // Apply teal color to white spaces found along line paths
     color = mix(color, uGradientColor, colorIntensity);
-    
 
     gl_FragColor = vec4(color, alpha);
   }
@@ -755,11 +830,18 @@ export function createSpiralBackground(
   const perspectiveCamera = camera as THREE.PerspectiveCamera;
   const scratchVec3 = new THREE.Vector3();
   const planeDistance = 15; // far behind doors
-  const fov = (perspectiveCamera.fov * Math.PI) / 180;
-  const cameraDistFromOrigin = Math.abs(perspectiveCamera.position.z);
-  const totalDistance = cameraDistFromOrigin + planeDistance;
-  const planeHeight = 2 * Math.tan(fov / 2) * totalDistance;
-  const planeWidth = planeHeight * perspectiveCamera.aspect;
+  let planeHeight = 0;
+  let planeWidth = 0;
+
+  function calculatePlaneSize() {
+    const fov = (perspectiveCamera.fov * Math.PI) / 180;
+    const cameraDistFromOrigin = Math.abs(perspectiveCamera.position.z);
+    const totalDistance = cameraDistFromOrigin + planeDistance;
+    planeHeight = 2 * Math.tan(fov / 2) * totalDistance;
+    planeWidth = planeHeight * perspectiveCamera.aspect;
+  }
+
+  calculatePlaneSize();
 
   const plane = new THREE.Mesh(
     new THREE.PlaneGeometry(planeWidth, planeHeight),
@@ -768,6 +850,395 @@ export function createSpiralBackground(
   plane.position.set(0, 0, -planeDistance); // far behind doors
   plane.renderOrder = -999; // render first, before everything
   parent.add(plane);
+
+  // ===== Obstacle meshes with blur-fade effect =====
+  // Helper to convert screen UV (0-1) to world position on the spiral plane
+  function uvToWorldPos(uv: THREE.Vector2): THREE.Vector3 {
+    // UV is in screen space (0-1)
+    // IMPORTANT: The shader uses gl_FragCoord.xy / uResolution, which gives:
+    // X: 0 = left, 1 = right
+    // Y: 0 = bottom, 1 = top (flipped from standard UV where 0=top, 1=bottom)
+    // Convert to world position on the plane
+    // Plane center is at (0, 0, -planeDistance)
+    // Plane extends from -planeWidth/2 to +planeWidth/2 in X
+    // Plane extends from -planeHeight/2 to +planeHeight/2 in Y
+    // World Y: +Y is up, -Y is down, 0 is center
+    const worldX = (uv.x - 0.5) * planeWidth;
+    // For shader UV: Y=0 (bottom) -> world -planeHeight/2, Y=1 (top) -> world +planeHeight/2
+    const worldY = (uv.y - 0.5) * planeHeight;
+    return new THREE.Vector3(worldX, worldY, -planeDistance);
+  }
+
+  // Blur-fade shader material for obstacles
+  const obstacleVertexShader = /* glsl */ `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `;
+
+  const obstacleFragmentShader = /* glsl */ `
+    precision highp float;
+    varying vec2 vUv;
+    
+    void main() {
+      // Make trapezoid completely transparent - it's only used as a detector
+      // The spiral shader uses the trapezoid corners to find and color ripples
+      discard;
+    }
+  `;
+
+  const obstacleMaterial = new THREE.ShaderMaterial({
+    vertexShader: obstacleVertexShader,
+    fragmentShader: obstacleFragmentShader,
+    transparent: true,
+    opacity: 0.0, // Completely transparent - only used as detector
+    depthWrite: false,
+    depthTest: true,
+    side: THREE.DoubleSide,
+    blending: THREE.NormalBlending,
+    uniforms: {}, // No uniforms needed - mesh is invisible
+  });
+
+  // Create obstacle meshes
+  let leftObstacleMesh: THREE.Mesh | null = null;
+  let rightObstacleMesh: THREE.Mesh | null = null;
+
+  // Edge lines for obstacles (using simple lines)
+  const leftObstacleLines: THREE.Line[] = [];
+  const rightObstacleLines: THREE.Line[] = [];
+
+  // Line material for obstacle edges - use simple line material
+  const edgeLineMaterial = new THREE.LineBasicMaterial({
+    color: 0xff0000, // Bright red
+    linewidth: 10, // Very thick (may not work on all systems)
+    depthTest: false,
+    depthWrite: false,
+  });
+
+  // Helper to create a simple line between two points
+  function createThickLine(
+    start: THREE.Vector3,
+    end: THREE.Vector3,
+    thickness: number = 0.05
+  ): THREE.Line {
+    const geometry = new THREE.BufferGeometry().setFromPoints([start, end]);
+    const line = new THREE.Line(geometry, edgeLineMaterial);
+    return line;
+  }
+
+  // Helper to create or update edge lines
+  function updateEdgeLines(
+    corners: THREE.Vector2[],
+    lines: THREE.Line[],
+    groupName: string
+  ) {
+    // Remove old lines (but don't dispose material - it's shared)
+    lines.forEach((line: THREE.Line) => {
+      if (line.parent) {
+        line.parent.remove(line);
+      }
+      scene.remove(line);
+      line.geometry.dispose();
+      // Don't dispose material - it's shared and reused
+    });
+    lines.length = 0;
+
+    if (corners.length < 2) {
+      return;
+    }
+
+    // Create lines connecting corners to form the obstacle edges
+    // For C-shape: connect corners in order: 0->1, 1->2, 2->3, 3->0
+    const linePairs = [
+      [0, 1], // Top edge
+      [1, 2], // Left edge
+      [2, 3], // Bottom edge
+      [3, 0], // Right edge
+    ];
+
+    linePairs.forEach(([startIdx, endIdx], lineIndex) => {
+      const startCorner = corners[startIdx];
+      const endCorner = corners[endIdx];
+
+      const startWorld = uvToWorldPos(startCorner);
+      const endWorld = uvToWorldPos(endCorner);
+
+      // Position lines much closer to camera to ensure visibility
+      const zPos = planeDistance - 10.0; // Much closer to camera
+      const start = new THREE.Vector3(startWorld.x, startWorld.y, zPos);
+      const end = new THREE.Vector3(endWorld.x, endWorld.y, zPos);
+
+      const lineMesh = createThickLine(start, end, 0.5);
+      lineMesh.renderOrder = 10000; // Extremely high render order to be on top
+      lineMesh.frustumCulled = false;
+      lineMesh.visible = true;
+      lineMesh.name = `${groupName}_edge_${lineIndex}`;
+
+      scene.add(lineMesh);
+      lines.push(lineMesh);
+
+      // Add a test sphere at the start position to verify rendering works
+      if (lineIndex === 0 && groupName === "left") {
+        const testSphere = new THREE.Mesh(
+          new THREE.SphereGeometry(1, 16, 16),
+          new THREE.MeshBasicMaterial({ color: 0x00ff00 })
+        );
+        testSphere.position.copy(start);
+        testSphere.name = "test_sphere";
+        scene.add(testSphere);
+        console.log("Added test sphere at:", start);
+      }
+
+      // Debug log
+      console.log(`Created edge line ${groupName}_${lineIndex}:`, {
+        start: {
+          x: start.x.toFixed(2),
+          y: start.y.toFixed(2),
+          z: start.z.toFixed(2),
+        },
+        end: { x: end.x.toFixed(2), y: end.y.toFixed(2), z: end.z.toFixed(2) },
+        length: start.distanceTo(end).toFixed(2),
+      });
+    });
+
+    console.log(`Created ${lines.length} edge lines for ${groupName} obstacle`);
+  }
+
+  // Function to calculate 4 corners of C-shape obstacle in UV space
+  // Shape is defined purely by corner positions (no angle calculations)
+  function calculateObstacleCorners(
+    pos: THREE.Vector2, // Edge position (right edge for left, left edge for right)
+    size: THREE.Vector2,
+    rotation: number,
+    isLeft: boolean,
+    topRightCornerOffsetX: number = 0.0, // Offset to move right top corner right (as percentage of width)
+    topRightCornerOffsetY: number = 0.0, // Offset to move right top corner up (as percentage of height)
+    topLeftCornerOffsetX: number = 0.0, // Offset to move left top corner right (as percentage of width)
+    topLeftCornerOffsetY: number = 0.0, // Offset to move left top corner up (as percentage of height)
+    bottomRightCornerOffsetX: number = 0.0, // Offset to move bottom corner right (as percentage of width)
+    bottomRightCornerOffsetY: number = 0.0, // Offset to move bottom corner up (as percentage of height)
+    bottomLeftCornerOffsetX: number = 0.0, // Offset to move left bottom corner right (as percentage of width)
+    bottomLeftCornerOffsetY: number = 0.0 // Offset to move left bottom corner up (as percentage of height)
+  ): THREE.Vector2[] {
+    const halfSize = new THREE.Vector2(size.x * 0.5, size.y * 0.5);
+
+    // Calculate center position in UV space
+    const centerX = isLeft ? pos.x - halfSize.x : pos.x + halfSize.x;
+    const centerPos = new THREE.Vector2(centerX, pos.y);
+
+    // Define corners directly in local space relative to center
+    // No angle calculations - corners are defined by their offsets
+    const corners: THREE.Vector2[] = [];
+    const cosRot = Math.cos(rotation);
+    const sinRot = Math.sin(rotation);
+
+    if (isLeft) {
+      // Left obstacle: define corners directly (no angle calculations)
+      // Start with base positions in local space relative to center
+      const topRightBase = new THREE.Vector2(halfSize.x, halfSize.y);
+      const topLeftBase = new THREE.Vector2(-halfSize.x, halfSize.y);
+      const bottomRightBase = new THREE.Vector2(halfSize.x, -halfSize.y);
+      const bottomLeftBase = new THREE.Vector2(-halfSize.x, -halfSize.y);
+
+      // Apply offsets to base positions
+      const topRightCorner = new THREE.Vector2(
+        topRightBase.x + topRightCornerOffsetX * size.x,
+        topRightBase.y + topRightCornerOffsetY * size.y
+      );
+      const topLeftCorner = new THREE.Vector2(
+        topLeftBase.x + topLeftCornerOffsetX * size.x,
+        topLeftBase.y + topLeftCornerOffsetY * size.y
+      );
+      const bottomRightCorner = new THREE.Vector2(
+        bottomRightBase.x + bottomRightCornerOffsetX * size.x,
+        bottomRightBase.y + bottomRightCornerOffsetY * size.y
+      );
+      const bottomLeftCorner = new THREE.Vector2(
+        bottomLeftBase.x + bottomLeftCornerOffsetX * size.x,
+        bottomLeftBase.y + bottomLeftCornerOffsetY * size.y
+      );
+
+      // Apply rotation around top-right corner (rotation center)
+      const rotationCenter = topRightCorner.clone();
+
+      // Rotate all corners around the rotation center
+      const rotatePoint = (
+        point: THREE.Vector2,
+        center: THREE.Vector2
+      ): THREE.Vector2 => {
+        const relative = point.clone().sub(center);
+        return new THREE.Vector2(
+          relative.x * cosRot - relative.y * sinRot,
+          relative.x * sinRot + relative.y * cosRot
+        ).add(center);
+      };
+
+      const topRightRotated = topRightCorner.clone(); // Rotation center, stays fixed
+      const topLeftRotated = rotatePoint(topLeftCorner, rotationCenter);
+      const bottomRightRotated = rotatePoint(bottomRightCorner, rotationCenter);
+      const bottomLeftRotated = rotatePoint(bottomLeftCorner, rotationCenter);
+
+      corners.push(
+        topRightRotated,
+        topLeftRotated,
+        bottomLeftRotated,
+        bottomRightRotated
+      );
+    } else {
+      // Right obstacle: define corners directly (no angle calculations)
+      // Start with base positions in local space relative to center
+      const topLeftBase = new THREE.Vector2(-halfSize.x, halfSize.y);
+      const topRightBase = new THREE.Vector2(halfSize.x, halfSize.y);
+      const bottomLeftBase = new THREE.Vector2(-halfSize.x, -halfSize.y);
+      const bottomRightBase = new THREE.Vector2(halfSize.x, -halfSize.y);
+
+      // Apply offsets to base positions
+      const topLeftCorner = new THREE.Vector2(
+        topLeftBase.x + topLeftCornerOffsetX * size.x,
+        topLeftBase.y + topLeftCornerOffsetY * size.y
+      );
+      const topRightCorner = new THREE.Vector2(
+        topRightBase.x + topRightCornerOffsetX * size.x,
+        topRightBase.y + topRightCornerOffsetY * size.y
+      );
+      const bottomLeftCorner = new THREE.Vector2(
+        bottomLeftBase.x + bottomLeftCornerOffsetX * size.x,
+        bottomLeftBase.y + bottomLeftCornerOffsetY * size.y
+      );
+      const bottomRightCorner = new THREE.Vector2(
+        bottomRightBase.x + bottomRightCornerOffsetX * size.x,
+        bottomRightBase.y + bottomRightCornerOffsetY * size.y
+      );
+
+      // Apply rotation around top-left corner (rotation center)
+      const rotationCenter = topLeftCorner.clone();
+
+      // Rotate all corners around the rotation center
+      const rotatePoint = (
+        point: THREE.Vector2,
+        center: THREE.Vector2
+      ): THREE.Vector2 => {
+        const relative = point.clone().sub(center);
+        return new THREE.Vector2(
+          relative.x * cosRot - relative.y * sinRot,
+          relative.x * sinRot + relative.y * cosRot
+        ).add(center);
+      };
+
+      const topLeftRotated = topLeftCorner.clone(); // Rotation center, stays fixed
+      const topRightRotated = rotatePoint(topRightCorner, rotationCenter);
+      const bottomLeftRotated = rotatePoint(bottomLeftCorner, rotationCenter);
+      const bottomRightRotated = rotatePoint(bottomRightCorner, rotationCenter);
+
+      corners.push(
+        topLeftRotated,
+        topRightRotated,
+        bottomRightRotated,
+        bottomLeftRotated
+      );
+    }
+
+    // Convert from local space to UV space and add center offset
+    return corners.map((corner) => {
+      // Corner is in local space relative to center, add center position
+      return new THREE.Vector2(centerPos.x + corner.x, centerPos.y + corner.y);
+    });
+  }
+
+  // Function to update obstacle meshes
+  function updateObstacleMeshes() {
+    const leftPos = uniforms.uSideTextLeftPos.value;
+    const leftSize = uniforms.uSideTextLeftSize.value;
+    const rightPos = uniforms.uSideTextRightPos.value;
+    const rightSize = uniforms.uSideTextRightSize.value;
+
+    // Update left obstacle mesh
+    if (leftPos.x >= 0.0 && leftSize.x > 0.001 && leftSize.y > 0.001) {
+      // Use positions directly - both shader and calculateTextBounds use Y=0 at bottom
+      const corners = calculateObstacleCorners(
+        leftPos,
+        leftSize,
+        uniforms.uSideTextLeftRotation.value,
+        true,
+        uniforms.uSideTextLeftTopRightCornerOffsetX.value,
+        uniforms.uSideTextLeftTopRightCornerOffsetY.value,
+        uniforms.uSideTextLeftTopLeftCornerOffsetX.value,
+        uniforms.uSideTextLeftTopLeftCornerOffsetY.value,
+        uniforms.uSideTextLeftBottomRightCornerOffsetX.value,
+        uniforms.uSideTextLeftBottomRightCornerOffsetY.value,
+        uniforms.uSideTextLeftBottomLeftCornerOffsetX.value,
+        uniforms.uSideTextLeftBottomLeftCornerOffsetY.value
+      );
+
+      // Create or update mesh
+      if (!leftObstacleMesh) {
+        const geometry = new THREE.BufferGeometry();
+        leftObstacleMesh = new THREE.Mesh(geometry, obstacleMaterial.clone());
+        leftObstacleMesh.renderOrder = -998; // Just after spiral background
+        parent.add(leftObstacleMesh);
+      }
+
+      // Update geometry with new corners
+      const positions = new Float32Array([
+        ...uvToWorldPos(corners[0]).toArray(),
+        ...uvToWorldPos(corners[1]).toArray(),
+        ...uvToWorldPos(corners[2]).toArray(),
+        ...uvToWorldPos(corners[0]).toArray(),
+        ...uvToWorldPos(corners[2]).toArray(),
+        ...uvToWorldPos(corners[3]).toArray(),
+      ]);
+
+      const uvs = new Float32Array([
+        1.0,
+        1.0, // top-right
+        0.0,
+        1.0, // top-left
+        0.0,
+        0.0, // bottom-left
+        1.0,
+        1.0, // top-right
+        0.0,
+        0.0, // bottom-left
+        1.0,
+        0.0, // bottom-right
+      ]);
+
+      leftObstacleMesh.geometry.setAttribute(
+        "position",
+        new THREE.BufferAttribute(positions, 3)
+      );
+      leftObstacleMesh.geometry.setAttribute(
+        "uv",
+        new THREE.BufferAttribute(uvs, 2)
+      );
+      leftObstacleMesh.geometry.computeVertexNormals();
+      leftObstacleMesh.visible = true;
+
+      // Update edge lines
+      updateEdgeLines(corners, leftObstacleLines, "left");
+
+      // Update trapezoid corners in shader for color modification
+      if (corners.length >= 4) {
+        uniforms.uTrapezoidCorner0.value.copy(corners[0]); // Top-right
+        uniforms.uTrapezoidCorner1.value.copy(corners[1]); // Top-left
+        uniforms.uTrapezoidCorner2.value.copy(corners[2]); // Bottom-left
+        uniforms.uTrapezoidCorner3.value.copy(corners[3]); // Bottom-right
+        uniforms.uTrapezoidActive.value = 1.0;
+      }
+    } else if (leftObstacleMesh) {
+      leftObstacleMesh.visible = false;
+      // Hide edge lines
+      leftObstacleLines.forEach((line) => {
+        line.visible = false;
+      });
+      // Deactivate trapezoid color modification
+      uniforms.uTrapezoidActive.value = 0.0;
+    }
+
+    // Right obstacle mesh removed - no longer creating/updating it
+  }
 
   function updateCenters() {
     projectObjectToScreenUv(
@@ -794,18 +1265,16 @@ export function createSpiralBackground(
       .copy(uniforms.uHoleRadius.value)
       .multiplyScalar(1.35);
 
-    // Update plane geometry size to match new aspect ratio
-    const fov = (perspectiveCamera.fov * Math.PI) / 180;
-    const cameraDistFromOrigin = Math.abs(perspectiveCamera.position.z);
-    const totalDistance = cameraDistFromOrigin + planeDistance;
-    const planeHeight = 2 * Math.tan(fov / 2) * totalDistance;
-    const planeWidth = planeHeight * perspectiveCamera.aspect;
+    // Update plane size
+    calculatePlaneSize();
 
     // Update plane geometry dimensions
     plane.geometry.dispose();
     plane.geometry = new THREE.PlaneGeometry(planeWidth, planeHeight);
 
     updateCenters();
+    // Update obstacle meshes when resizing
+    updateObstacleMeshes();
   }
 
   // Arrow animation state
@@ -1002,6 +1471,36 @@ export function createSpiralBackground(
   }
 
   function dispose() {
+    // Clean up edge lines
+    leftObstacleLines.forEach((line) => {
+      if (line.parent) {
+        line.parent.remove(line);
+      }
+      scene.remove(line);
+      line.geometry.dispose();
+      if (Array.isArray(line.material)) {
+        line.material.forEach((m) => m.dispose());
+      } else {
+        line.material.dispose();
+      }
+    });
+    leftObstacleLines.length = 0;
+
+    rightObstacleLines.forEach((line) => {
+      if (line.parent) {
+        line.parent.remove(line);
+      }
+      scene.remove(line);
+      line.geometry.dispose();
+      if (Array.isArray(line.material)) {
+        line.material.forEach((m) => m.dispose());
+      } else {
+        line.material.dispose();
+      }
+    });
+    rightObstacleLines.length = 0;
+
+    edgeLineMaterial.dispose();
     // Clean up scroll listeners
     if (typeof window !== "undefined") {
       window.removeEventListener("scroll", handleScroll);
@@ -1015,6 +1514,50 @@ export function createSpiralBackground(
     if (arrowVisibilityTween) {
       arrowVisibilityTween.kill();
     }
+    // Clean up obstacle meshes
+    if (leftObstacleMesh) {
+      parent.remove(leftObstacleMesh);
+      leftObstacleMesh.geometry.dispose();
+      (leftObstacleMesh.material as THREE.Material).dispose();
+    }
+    if (rightObstacleMesh) {
+      parent.remove(rightObstacleMesh);
+      rightObstacleMesh.geometry.dispose();
+      (rightObstacleMesh.material as THREE.Material).dispose();
+    }
+    obstacleMaterial.dispose();
+
+    // Clean up edge lines
+    leftObstacleLines.forEach((line: THREE.Line) => {
+      if (line.parent) {
+        line.parent.remove(line);
+      }
+      scene.remove(line);
+      line.geometry.dispose();
+      if (Array.isArray(line.material)) {
+        line.material.forEach((m: THREE.Material) => m.dispose());
+      } else {
+        line.material.dispose();
+      }
+    });
+    leftObstacleLines.length = 0;
+
+    rightObstacleLines.forEach((line: THREE.Line) => {
+      if (line.parent) {
+        line.parent.remove(line);
+      }
+      scene.remove(line);
+      line.geometry.dispose();
+      if (Array.isArray(line.material)) {
+        line.material.forEach((m: THREE.Material) => m.dispose());
+      } else {
+        line.material.dispose();
+      }
+    });
+    rightObstacleLines.length = 0;
+
+    edgeLineMaterial.dispose();
+
     parent.remove(plane);
     plane.geometry.dispose();
     mat.dispose();
@@ -1047,6 +1590,9 @@ export function createSpiralBackground(
       uniforms.uSideTextRightPos.value.set(-1.0, 0.5);
       uniforms.uSideTextRightSize.value.set(0.0, 0.0);
     }
+
+    // Update obstacle meshes when positions change
+    updateObstacleMeshes();
   }
 
   // Method to update edge angles immediately (no animation delay)
@@ -1068,6 +1614,9 @@ export function createSpiralBackground(
     if (rightBottomAngle !== undefined) {
       uniforms.uSideTextRightBottomAngle.value = rightBottomAngle;
     }
+
+    // Update obstacle meshes when angles change
+    updateObstacleMeshes();
   }
 
   // Method to update obstacle rotation immediately (no animation delay)
@@ -1081,6 +1630,9 @@ export function createSpiralBackground(
     if (rightRotation !== undefined) {
       uniforms.uSideTextRightRotation.value = rightRotation;
     }
+
+    // Update obstacle meshes when rotation changes
+    updateObstacleMeshes();
   }
 
   return {
