@@ -155,8 +155,8 @@ export function loadWavyTexts(params: LoadWavyTextsParams): Promise<void> {
             position: { x: 0, y: -2, z: -8 },
             size: 1.08,
             color: "#11edbd",
-            distortionStrength: 0.015,
-            rippleIntensity: 0.08,
+            distortionStrength: 0.008,
+            rippleIntensity: 0.8,
             spiralUniforms: {
               uTime: spiralUniforms.uTime as { value: number },
               uResolution: spiralUniforms.uResolution as {

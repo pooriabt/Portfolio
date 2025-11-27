@@ -68,7 +68,7 @@ export function createSpiralBackground(
     uSideTextRightPos: { value: new THREE.Vector2(-1.0, 0.5) }, // -1 means not visible
     uSideTextLeftSize: { value: new THREE.Vector2(0.0, 0.0) }, // Width and height of left text in screen UV space
     uSideTextRightSize: { value: new THREE.Vector2(0.0, 0.0) }, // Width and height of right text in screen UV space
-    uSideTextObstacleStrength: { value: 0.5 }, // How strong the obstacle effect is
+    uSideTextObstacleStrength: { value: 0.7 }, // How strong the obstacle effect is
     // Edge angles in radians (0 = horizontal, positive = rotated counterclockwise)
     uSideTextLeftTopAngle: { value: -0.25 }, // Top edge angle for left obstacle
     uSideTextLeftBottomAngle: { value: -0.1 }, // Bottom edge angle for left obstacle
@@ -77,18 +77,25 @@ export function createSpiralBackground(
     // Obstacle rotation in radians (pivots at upper corner)
     uSideTextLeftRotation: { value: -0.2 }, // Rotation for left obstacle (pivot: top-right corner)
     uSideTextRightRotation: { value: 0.2 }, // Rotation for right obstacle (pivot: top-left corner)
-    // Trapezoid corners for color modification (in UV space)
+    // Trapezoid corners for color modification (in UV space) - Left obstacle
     uTrapezoidCorner0: { value: new THREE.Vector2(0.0, 0.0) }, // Top-right
     uTrapezoidCorner1: { value: new THREE.Vector2(0.0, 0.0) }, // Top-left
     uTrapezoidCorner2: { value: new THREE.Vector2(0.0, 0.0) }, // Bottom-left
     uTrapezoidCorner3: { value: new THREE.Vector2(0.0, 0.0) }, // Bottom-right
-    uTrapezoidColor: { value: new THREE.Color(0x00ff00) }, // Color for ripples inside trapezoid (green by default)
+    uTrapezoidColor: { value: new THREE.Color(0x020003) }, // Color for white ripples inside trapezoid
+    uTrapezoidBlackColor: { value: new THREE.Color(0x020003) }, // Color for black ripples inside trapezoid
     uTrapezoidActive: { value: 0.0 }, // 0 = inactive, 1 = active
+    // Trapezoid corners for color modification (in UV space) - Right obstacle
+    uTrapezoidRightCorner0: { value: new THREE.Vector2(0.0, 0.0) }, // Top-right
+    uTrapezoidRightCorner1: { value: new THREE.Vector2(0.0, 0.0) }, // Top-left
+    uTrapezoidRightCorner2: { value: new THREE.Vector2(0.0, 0.0) }, // Bottom-left
+    uTrapezoidRightCorner3: { value: new THREE.Vector2(0.0, 0.0) }, // Bottom-right
+    uTrapezoidRightActive: { value: 0.0 }, // 0 = inactive, 1 = active
 
     // Left obstacle corner offsets (as percentage of size)
     // Top corners
     uSideTextLeftTopRightCornerOffsetX: { value: 0.06 }, // Move top-right corner right (as percentage of width)
-    uSideTextLeftTopRightCornerOffsetY: { value: 0.16 }, // Move top-right corner up (as percentage of height)
+    uSideTextLeftTopRightCornerOffsetY: { value: 0.2 }, // Move top-right corner up (as percentage of height)
     uSideTextLeftTopLeftCornerOffsetX: { value: -1.0 }, // Move top-left corner right (as percentage of width)
     uSideTextLeftTopLeftCornerOffsetY: { value: -0.04 }, // Move top-left corner up (as percentage of height)
     // Bottom corners
@@ -148,13 +155,20 @@ export function createSpiralBackground(
   // Obstacle rotation in radians (pivots at upper corner)
   uniform float uSideTextLeftRotation;
   uniform float uSideTextRightRotation;
-  // Trapezoid corners for color modification
+  // Trapezoid corners for color modification - Left obstacle
   uniform vec2 uTrapezoidCorner0; // Top-right
   uniform vec2 uTrapezoidCorner1; // Top-left
   uniform vec2 uTrapezoidCorner2; // Bottom-left
   uniform vec2 uTrapezoidCorner3; // Bottom-right
-  uniform vec3 uTrapezoidColor; // Color for ripples inside trapezoid
+  uniform vec3 uTrapezoidColor; // Color for white ripples inside trapezoid
+  uniform vec3 uTrapezoidBlackColor; // Color for black ripples inside trapezoid
   uniform float uTrapezoidActive; // 0 = inactive, 1 = active
+  // Trapezoid corners for color modification - Right obstacle
+  uniform vec2 uTrapezoidRightCorner0; // Top-right
+  uniform vec2 uTrapezoidRightCorner1; // Top-left
+  uniform vec2 uTrapezoidRightCorner2; // Bottom-left
+  uniform vec2 uTrapezoidRightCorner3; // Bottom-right
+  uniform float uTrapezoidRightActive; // 0 = inactive, 1 = active
 
   // Band shape helper (creates a single moving band centered at phase 'o')
   float bandAt(float o, float ss, float width) {
@@ -219,6 +233,60 @@ export function createSpiralBackground(
     
     return (allPositive || allNegative) ? 1.0 : 0.0;
   }
+  
+  // Helper function to apply trapezoid color logic
+  // This function applies the same color modification logic to any trapezoid
+  vec3 applyTrapezoidColor(
+    vec3 currentColor,
+    vec2 uv,
+    vec2 corner0,
+    vec2 corner1,
+    vec2 corner2,
+    vec2 corner3,
+    float totalDistortion,
+    float band,
+    float uSideTextObstacleStrength
+  ) {
+    float insideTrapezoid = pointInQuad(
+      uv,
+      corner0, // Top-right
+      corner1, // Top-left
+      corner2, // Bottom-left
+      corner3  // Bottom-right
+    );
+    
+    if (insideTrapezoid > 0.5) {
+      // Select ripples based on distortion level:
+      // - Low distortion = original ripples or inside ripples (close to original direction) -> SELECT
+      // - High distortion = border ripples (changed direction) -> IGNORE
+      
+      // Scale threshold with obstacle strength to maintain consistent selection
+      // Base threshold of 1.22 was calibrated for strength 0.5
+      // Scale proportionally: threshold = baseThreshold * (currentStrength / baseStrength)
+      float baseStrength = 0.5; // The strength the threshold was calibrated for
+      float strengthRatio = max(uSideTextObstacleStrength / max(baseStrength, 0.001), 0.001);
+      float distortionThreshold = 1.22 * strengthRatio;
+      
+      if (totalDistortion >= distortionThreshold) {
+        // Ripple has distortion >= threshold - apply trapezoid color independently to white and black ripples
+        // White ripples mask - only bright ripple bands (high band values)
+        float whiteRippleMask = smoothstep(0.6, 0.9, band);
+        // Black ripples mask - only dark ripple bands (low band values)
+        // Combine two conditions: not white AND very dark
+        float notWhite = 1.0 - smoothstep(0.6, 0.9, band);
+        float isDark = 1.0 - smoothstep(0.1, 0.4, band);
+        float blackRippleMask = notWhite * isDark;
+        
+        // Apply color to white ripples independently (only affects white bands)
+        currentColor = mix(currentColor, uTrapezoidColor, whiteRippleMask * 0.8);
+        // Apply color to black ripples independently (only affects black bands)
+        currentColor = mix(currentColor, uTrapezoidBlackColor, blackRippleMask * 0.8);
+      }
+      // Ripples with distortion < threshold are excluded
+    }
+    
+    return currentColor;
+  }
 
   void main() {
     vec2 uv = gl_FragCoord.xy / uResolution;
@@ -248,6 +316,8 @@ export function createSpiralBackground(
     float obstacleDistortion1 = 0.0;
     bool insideLeftObstacle = false;
     bool insideRightObstacle = false;
+    float leftObstacleInfluence = 0.0;
+    float rightObstacleInfluence = 0.0;
     
     // Left text obstacle - "C" shape with controllable angled edges
     // uSideTextLeftPos is now the RIGHT EDGE position (not center) for early appearance
@@ -364,7 +434,7 @@ export function createSpiralBackground(
       
       // Create smooth falloff - stronger near text, fades with distance
       float influenceRadius = max(halfSizeAspect.x, halfSizeAspect.y) * 2.5; // Extend influence beyond text
-      float leftObstacleInfluence = 1.0 - smoothstep(0.0, influenceRadius, distToRect);
+      leftObstacleInfluence = 1.0 - smoothstep(0.0, influenceRadius, distToRect);
       leftObstacleInfluence *= uSideTextObstacleStrength;
       
       if (leftObstacleInfluence > 0.01) {
@@ -497,7 +567,7 @@ export function createSpiralBackground(
       
       // Create smooth falloff - stronger near text, fades with distance
       float influenceRadius = max(halfSizeAspect.x, halfSizeAspect.y) * 2.5; // Extend influence beyond text
-      float rightObstacleInfluence = 1.0 - smoothstep(0.0, influenceRadius, distToRect);
+      rightObstacleInfluence = 1.0 - smoothstep(0.0, influenceRadius, distToRect);
       rightObstacleInfluence *= uSideTextObstacleStrength;
       
       if (rightObstacleInfluence > 0.01) {
@@ -569,22 +639,37 @@ export function createSpiralBackground(
     // base b/w spiral color
     vec3 color = mix(vec3(0.0), vec3(1.0), band);
     
-    // ===== Check if inside trapezoid and modify color =====
+    // ===== Check if inside left trapezoid and modify color =====
+    float totalDistortion = abs(obstacleDistortion0) + abs(obstacleDistortion1);
+    
     if (uTrapezoidActive > 0.5) {
-      float insideTrapezoid = pointInQuad(
+      color = applyTrapezoidColor(
+        color,
         uv,
-        uTrapezoidCorner0, // Top-right
-        uTrapezoidCorner1, // Top-left
-        uTrapezoidCorner2, // Bottom-left
-        uTrapezoidCorner3  // Bottom-right
+        uTrapezoidCorner0,
+        uTrapezoidCorner1,
+        uTrapezoidCorner2,
+        uTrapezoidCorner3,
+        totalDistortion,
+        band,
+        uSideTextObstacleStrength
       );
-      
-      if (insideTrapezoid > 0.5) {
-        // Inside trapezoid - modify ripple colors
-        // Apply trapezoid color to the ripples (white bands)
-        float rippleMask = smoothstep(0.3, 0.9, band); // Mask for ripple areas
-        color = mix(color, uTrapezoidColor, rippleMask * 0.8); // Blend with trapezoid color
-      }
+    }
+    
+    // ===== Check if inside right trapezoid and modify color =====
+    // Use the same logic as left trapezoid
+    if (uTrapezoidRightActive > 0.5) {
+      color = applyTrapezoidColor(
+        color,
+        uv,
+        uTrapezoidRightCorner0,
+        uTrapezoidRightCorner1,
+        uTrapezoidRightCorner2,
+        uTrapezoidRightCorner3,
+        totalDistortion,
+        band,
+        uSideTextObstacleStrength
+      );
     }
 
     // ===== Gradient overlay only on white bands, triangular region, animated downward =====
@@ -1226,6 +1311,31 @@ export function createSpiralBackground(
         uniforms.uTrapezoidCorner2.value.copy(corners[2]); // Bottom-left
         uniforms.uTrapezoidCorner3.value.copy(corners[3]); // Bottom-right
         uniforms.uTrapezoidActive.value = 1.0;
+
+        // Mirror left trapezoid corners horizontally to create right trapezoid
+        // Mirror horizontally: x -> 1.0 - x
+        // Corner mapping after mirroring:
+        // Left Corner0 (top-right) -> Right Corner1 (top-left)
+        // Left Corner1 (top-left) -> Right Corner0 (top-right)
+        // Left Corner2 (bottom-left) -> Right Corner3 (bottom-right)
+        // Left Corner3 (bottom-right) -> Right Corner2 (bottom-left)
+        uniforms.uTrapezoidRightCorner0.value.set(
+          1.0 - corners[1].x,
+          corners[1].y
+        ); // Top-right (mirrored from left top-left)
+        uniforms.uTrapezoidRightCorner1.value.set(
+          1.0 - corners[0].x,
+          corners[0].y
+        ); // Top-left (mirrored from left top-right)
+        uniforms.uTrapezoidRightCorner2.value.set(
+          1.0 - corners[3].x,
+          corners[3].y
+        ); // Bottom-left (mirrored from left bottom-right)
+        uniforms.uTrapezoidRightCorner3.value.set(
+          1.0 - corners[2].x,
+          corners[2].y
+        ); // Bottom-right (mirrored from left bottom-left)
+        uniforms.uTrapezoidRightActive.value = 1.0;
       }
     } else if (leftObstacleMesh) {
       leftObstacleMesh.visible = false;
@@ -1235,9 +1345,89 @@ export function createSpiralBackground(
       });
       // Deactivate trapezoid color modification
       uniforms.uTrapezoidActive.value = 0.0;
+      uniforms.uTrapezoidRightActive.value = 0.0;
     }
 
-    // Right obstacle mesh removed - no longer creating/updating it
+    // Update right obstacle mesh (still needed for visual mesh, but trapezoid uses mirrored left corners)
+    if (rightPos.x >= 0.0 && rightSize.x > 0.001 && rightSize.y > 0.001) {
+      // Use positions directly - both shader and calculateTextBounds use Y=0 at bottom
+      const corners = calculateObstacleCorners(
+        rightPos,
+        rightSize,
+        uniforms.uSideTextRightRotation.value,
+        false,
+        0.0, // topRightCornerOffsetX - right obstacle uses different corner order
+        0.0, // topRightCornerOffsetY
+        0.0, // topLeftCornerOffsetX
+        0.0, // topLeftCornerOffsetY
+        0.0, // bottomRightCornerOffsetX
+        0.0, // bottomRightCornerOffsetY
+        0.0, // bottomLeftCornerOffsetX
+        0.0 // bottomLeftCornerOffsetY
+      );
+
+      // Create or update mesh
+      if (!rightObstacleMesh) {
+        const geometry = new THREE.BufferGeometry();
+        rightObstacleMesh = new THREE.Mesh(geometry, obstacleMaterial.clone());
+        rightObstacleMesh.renderOrder = -998; // Just after spiral background
+        parent.add(rightObstacleMesh);
+      }
+
+      // Update geometry with new corners
+      // Right obstacle corner order: topLeft, topRight, bottomRight, bottomLeft
+      const positions = new Float32Array([
+        ...uvToWorldPos(corners[0]).toArray(), // topLeft
+        ...uvToWorldPos(corners[1]).toArray(), // topRight
+        ...uvToWorldPos(corners[2]).toArray(), // bottomRight
+        ...uvToWorldPos(corners[0]).toArray(), // topLeft
+        ...uvToWorldPos(corners[2]).toArray(), // bottomRight
+        ...uvToWorldPos(corners[3]).toArray(), // bottomLeft
+      ]);
+
+      const uvs = new Float32Array([
+        0.0,
+        1.0, // top-left
+        1.0,
+        1.0, // top-right
+        1.0,
+        0.0, // bottom-right
+        0.0,
+        1.0, // top-left
+        1.0,
+        0.0, // bottom-right
+        0.0,
+        0.0, // bottom-left
+      ]);
+
+      rightObstacleMesh.geometry.setAttribute(
+        "position",
+        new THREE.BufferAttribute(positions, 3)
+      );
+      rightObstacleMesh.geometry.setAttribute(
+        "uv",
+        new THREE.BufferAttribute(uvs, 2)
+      );
+      rightObstacleMesh.geometry.computeVertexNormals();
+      rightObstacleMesh.visible = true;
+
+      // Update edge lines
+      updateEdgeLines(corners, rightObstacleLines, "right");
+
+      // Right trapezoid corners are set from mirrored left trapezoid corners above
+      // No need to set them here - they're already set when left obstacle is updated
+    } else if (rightObstacleMesh) {
+      rightObstacleMesh.visible = false;
+      // Hide edge lines
+      rightObstacleLines.forEach((line) => {
+        line.visible = false;
+      });
+      // Deactivate right trapezoid color modification (it's mirrored from left, so if right obstacle is hidden, deactivate)
+      uniforms.uTrapezoidRightActive.value = 0.0;
+    } else {
+      // If right obstacle doesn't exist but left does, right trapezoid is still active (mirrored from left)
+      // If neither exists, both are inactive (handled in left obstacle else clause above)
+    }
   }
 
   function updateCenters() {
