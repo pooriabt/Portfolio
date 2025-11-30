@@ -161,7 +161,9 @@ export function createAnimationLoop(params: AnimationLoopParams): () => void {
         const leftBounds = calculateTextBounds(leftTextMesh, camera);
 
         if (leftBounds.size.x > 0 && leftBounds.size.y > 0) {
+          // Calculate right edge position (uSideTextLeftPos is the RIGHT EDGE)
           const rightEdgeX = leftBounds.center.x + leftBounds.size.x * 0.5;
+          
           leftTextPos.set(rightEdgeX, leftBounds.center.y);
           leftTextSize.copy(leftBounds.size);
         } else {
@@ -181,7 +183,9 @@ export function createAnimationLoop(params: AnimationLoopParams): () => void {
         const rightBounds = calculateTextBounds(rightTextMesh, camera);
 
         if (rightBounds.size.x > 0 && rightBounds.size.y > 0) {
+          // Calculate left edge position (uSideTextRightPos is the LEFT EDGE)
           const leftEdgeX = rightBounds.center.x - rightBounds.size.x * 0.5;
+          
           rightTextPos.set(leftEdgeX, rightBounds.center.y);
           rightTextSize.copy(rightBounds.size);
         } else {
