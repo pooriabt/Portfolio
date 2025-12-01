@@ -574,84 +574,87 @@ export function useDoorSceneSetup({
         farsiMesh = farsiMeshRef.current;
       });
 
-    Promise.all([
-      loadEnglishWrapper(),
-      loadFarsiWrapper(),
-      loadWavyTextsWrapper(),
-    ])
-      .catch((err) => {
-        console.error("Error loading texts", err);
-      })
-      .finally(() => {
-        // Update wavy text and column text positions and sizes after all fonts are loaded
-        if (wavyTexts.length > 0 || columnTexts.length > 0) {
-          updateSizingWrapper();
-        }
-        textScrollTriggersRef.current.forEach((trigger) => trigger.kill());
-        textScrollTriggersRef.current = [];
-
-        const english = englishMesh ?? null;
-        const farsi = farsiMesh ?? null;
-
-        if (english) {
-          gsap.set(english.scale, { x: 1, y: 1, z: 1 });
-          english.rotation.set(0, 0, 0);
-        }
-        if (farsi) {
-          gsap.set(farsi.scale, { x: 1, y: 1, z: 1 });
-          farsi.rotation.set(0, 0, 0);
-        }
-
-        if (textGroupRef.current && (english || farsi)) {
-          const trigger = createScrollTrigger({
-            mount,
-            textGroupRef,
-            english,
-            farsi,
-            textControls,
-            farsiTextControls,
-            leftPortalGroup,
-            rightPortalGroup,
-            spiral,
-            spiralHoleRadiusRef,
-            portalGroupScale,
-            columnTexts,
-            camera,
-          });
-          textScrollTriggersRef.current.push(trigger);
-        }
-
-        ScrollTrigger.refresh();
-        updateSizingWrapper();
-
-        // After updateSizing sets target positions, hide side texts initially
-        // They will animate in during scroll when scaleProgress > 0
-        if (columnTexts.length >= 2) {
-          const leftTextMesh = columnTexts[0];
-          const rightTextMesh = columnTexts[1];
-
-          // Calculate off-screen positions
-          const textZ =
-            leftTextMesh.userData.targetZ || leftTextMesh.position.z || 0;
-          const offScreenPos = getOffScreenPositions(camera, textZ);
-
-          // Position off-screen and scale to 0
-          if (leftTextMesh.userData.targetX !== undefined) {
-            leftTextMesh.position.x = offScreenPos.left;
-            leftTextMesh.position.y = leftTextMesh.userData.targetY || 0;
-            leftTextMesh.position.z = leftTextMesh.userData.targetZ || 0;
-            leftTextMesh.scale.setScalar(0);
-          }
-          if (rightTextMesh.userData.targetX !== undefined) {
-            rightTextMesh.position.x = offScreenPos.right;
-            rightTextMesh.position.y = rightTextMesh.userData.targetY || 0;
-            rightTextMesh.position.z = rightTextMesh.userData.targetZ || 0;
-            rightTextMesh.scale.setScalar(0);
-          }
-        }
-      });
-
     rafId = requestAnimationFrame(animate);
+
+    // Defer font loading to next frame to ensure spiral renders first
+    requestAnimationFrame(() => {
+      Promise.all([
+        loadEnglishWrapper(),
+        loadFarsiWrapper(),
+        loadWavyTextsWrapper(),
+      ])
+        .catch((err) => {
+          console.error("Error loading texts", err);
+        })
+        .finally(() => {
+          // Update wavy text and column text positions and sizes after all fonts are loaded
+          if (wavyTexts.length > 0 || columnTexts.length > 0) {
+            updateSizingWrapper();
+          }
+          textScrollTriggersRef.current.forEach((trigger) => trigger.kill());
+          textScrollTriggersRef.current = [];
+
+          const english = englishMesh ?? null;
+          const farsi = farsiMesh ?? null;
+
+          if (english) {
+            gsap.set(english.scale, { x: 1, y: 1, z: 1 });
+            english.rotation.set(0, 0, 0);
+          }
+          if (farsi) {
+            gsap.set(farsi.scale, { x: 1, y: 1, z: 1 });
+            farsi.rotation.set(0, 0, 0);
+          }
+
+          if (textGroupRef.current && (english || farsi)) {
+            const trigger = createScrollTrigger({
+              mount,
+              textGroupRef,
+              english,
+              farsi,
+              textControls,
+              farsiTextControls,
+              leftPortalGroup,
+              rightPortalGroup,
+              spiral,
+              spiralHoleRadiusRef,
+              portalGroupScale,
+              columnTexts,
+              camera,
+            });
+            textScrollTriggersRef.current.push(trigger);
+          }
+
+          ScrollTrigger.refresh();
+          updateSizingWrapper();
+
+          // After updateSizing sets target positions, hide side texts initially
+          // They will animate in during scroll when scaleProgress > 0
+          if (columnTexts.length >= 2) {
+            const leftTextMesh = columnTexts[0];
+            const rightTextMesh = columnTexts[1];
+
+            // Calculate off-screen positions
+            const textZ =
+              leftTextMesh.userData.targetZ || leftTextMesh.position.z || 0;
+            const offScreenPos = getOffScreenPositions(camera, textZ);
+
+            // Position off-screen and scale to 0
+            if (leftTextMesh.userData.targetX !== undefined) {
+              leftTextMesh.position.x = offScreenPos.left;
+              leftTextMesh.position.y = leftTextMesh.userData.targetY || 0;
+              leftTextMesh.position.z = leftTextMesh.userData.targetZ || 0;
+              leftTextMesh.scale.setScalar(0);
+            }
+            if (rightTextMesh.userData.targetX !== undefined) {
+              rightTextMesh.position.x = offScreenPos.right;
+              rightTextMesh.position.y = rightTextMesh.userData.targetY || 0;
+              rightTextMesh.position.z = rightTextMesh.userData.targetZ || 0;
+              rightTextMesh.scale.setScalar(0);
+            }
+          }
+        });
+    });
 
     return () => {
       cancelAnimationFrame(rafId);
