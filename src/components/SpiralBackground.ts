@@ -38,7 +38,7 @@ export function createSpiralBackground(
     uHoleRadius: { value: new THREE.Vector2(0.08, 0.08) },
     uHoleRadiusOuter: { value: new THREE.Vector2(0.11, 0.11) },
     uSpeed: { value: 0.7 },
-    uBands: { value: 20.0 },
+    uBands: { value: 10.0 },
     uContrast: { value: 1.0 },
     // gradient/pulse/scroll uniforms
     uGradientColor: { value: new THREE.Color(0x00bcd4) }, // teal-ish
@@ -79,7 +79,7 @@ export function createSpiralBackground(
     uSideTextRightRotation: { value: 0.2 }, // Rotation for right obstacle (pivot: top-left corner)
     
     // Trapezoid colors and active state
-    uTrapezoidColor: { value: new THREE.Color(0x020003) }, // Color for white ripples inside trapezoid
+    uTrapezoidColor: { value: new THREE.Color(0x3d3d3d) }, // Color for white ripples inside trapezoid
     uTrapezoidBlackColor: { value: new THREE.Color(0x020003) }, // Color for black ripples inside trapezoid
     uTrapezoidActive: { value: 0.0 }, // 0 = inactive, 1 = active
     uTrapezoidRightActive: { value: 0.0 }, // 0 = inactive, 1 = active
@@ -543,7 +543,7 @@ export function createSpiralBackground(
     }
 
     // base b/w spiral color
-    vec3 color = mix(vec3(0.0), vec3(1.0), band);
+    vec3 color = mix(vec3(0,0,0), vec3(0.251, 0.251, 0.251), band);
     
     // ===== Apply color modification to visibly distorted area =====
     // Use influence threshold to match the C-shaped distortion boundary
