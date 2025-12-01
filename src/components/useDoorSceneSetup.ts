@@ -316,7 +316,13 @@ export function useDoorSceneSetup({
         leftOpen,
         (v) => (leftOpen = v),
         (v) => (animLeft = v),
-        animLeft
+        animLeft,
+        {
+          navigateTo: "/design-works",
+          portalGroup: leftPortalGroup,
+          spiral,
+          side: "left",
+        }
       );
     };
 
@@ -326,7 +332,13 @@ export function useDoorSceneSetup({
         rightOpen,
         (v) => (rightOpen = v),
         (v) => (animRight = v),
-        animRight
+        animRight,
+        {
+          navigateTo: "/development",
+          portalGroup: rightPortalGroup,
+          spiral,
+          side: "right",
+        }
       );
     };
 

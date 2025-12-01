@@ -19,6 +19,7 @@ export function createPortalEllipse(params: {
 }) {
   const uniforms = {
     uTime: { value: 0 },
+    uTimeMultiplier: { value: 1 },
     uSpread: { value: 1 }, // 0 = open (hole visible), 1 = closed (texture fully visible)
     uScale: { value: 1.0 },
     uHue: { value: params.hue ?? 0.18 },
@@ -26,6 +27,7 @@ export function createPortalEllipse(params: {
     uMap: { value: params.texture },
     uResolution: { value: new THREE.Vector2(512, 512) },
     uHoleRadius: { value: new THREE.Vector2(0.15, 0.25) }, // Match spiral background holes
+    uClickScale: { value: 1.0 },
     uCenter: { value: new THREE.Vector2(0.5, 0.5) },
     uSpeed: { value: 0.25 },
     uDensity: { value: 1.8 },
@@ -62,7 +64,9 @@ export function createPortalEllipse(params: {
     uniform sampler2D uMap;
     uniform vec2 uResolution;
     uniform vec2 uHoleRadius;
+    uniform float uClickScale;
     uniform vec2 uCenter;
+    uniform float uTimeMultiplier;
     uniform float uBrushRotation;
     uniform float uShowClickEllipse;
     uniform float uBrushWidth;
@@ -91,9 +95,11 @@ export function createPortalEllipse(params: {
       vec2 screenUv = gl_FragCoord.xy / uResolution;
       vec2 diffScreen = screenUv - uCenter;
 
+      float clickScale = max(uClickScale, 0.001);
+      vec2 scaledHoleRadius = uHoleRadius * clickScale;
       vec2 ellipseNorm = diffScreen;
-      ellipseNorm.x /= uHoleRadius.x;
-      ellipseNorm.y /= uHoleRadius.y;
+      ellipseNorm.x /= scaledHoleRadius.x;
+      ellipseNorm.y /= scaledHoleRadius.y;
       float ellipseDist = length(ellipseNorm);
 
       // Elliptical clipping - use alpha instead of discard to remove rectangular clipping
@@ -108,7 +114,8 @@ export function createPortalEllipse(params: {
         ellipseDist
       );
 
-      float t = uTime * 1.5;
+      float timeFactor = uTime * uTimeMultiplier;
+      float t = timeFactor * 1.5;
 
       // Base texture color
       vec3 baseColor = vec3(0.05);
@@ -183,13 +190,13 @@ export function createPortalEllipse(params: {
       float brushIntensity = 0.0;
       float brushZoneFactor = 0.0;
       float brushRadiusScale = 1.0 + clamp(uBrushWidth - 1.0, 0.0, 8.0) * 0.02;
-      vec2 meshBoundaryRadius = uHoleRadius * brushRadiusScale;
+      vec2 meshBoundaryRadius = scaledHoleRadius * brushRadiusScale;
       
       if (brushEnabled > 0.5) {
-        brushAngle = uTime * uBrushRotation;
+        brushAngle = timeFactor * uBrushRotation;
         
         // Calculate pulsing effect - living organ pulse (decreases width)
-        float pulsePhase = uTime * uBrushPulseSpeed;
+        float pulsePhase = timeFactor * uBrushPulseSpeed;
         float pulse = 0.5 + 0.5 * sin(pulsePhase); // Pulse from 0 to 1
         float pulseStrength = uBrushPulse; // Control overall pulse strength
         
@@ -208,7 +215,7 @@ export function createPortalEllipse(params: {
         );
         brushZoneFactor = step(0.01, brushIntensity);
       } else {
-        meshBoundaryRadius = uHoleRadius;
+        meshBoundaryRadius = scaledHoleRadius;
       }
       
       // Ellipse edge fade - extend beyond 1.0 for brush effect to cover SpiralBackground
@@ -223,7 +230,7 @@ export function createPortalEllipse(params: {
       // Calculate gradient position along the spinning brush (0 = start/dark, 1 = end/light)
       // Get the angle around the ellipse for gradient calculation
       vec2 diff = screenUv - uCenter;
-      float currentAngle = atan(diff.y / uHoleRadius.y, diff.x / uHoleRadius.x);
+      float currentAngle = atan(diff.y / scaledHoleRadius.y, diff.x / scaledHoleRadius.x);
       float rotatedAngle = currentAngle - brushAngle;
       rotatedAngle = rotatedAngle + 3.14159;
       rotatedAngle = rotatedAngle - floor(rotatedAngle / 6.28318) * 6.28318;
@@ -349,6 +356,7 @@ export function createPortalEllipse(params: {
   const brushUniforms = THREE.UniformsUtils.clone(mat.uniforms as any);
   const sharedUniformKeys = [
     "uTime",
+    "uTimeMultiplier",
     "uSpread",
     "uScale",
     "uHue",
@@ -356,6 +364,7 @@ export function createPortalEllipse(params: {
     "uMap",
     "uResolution",
     "uHoleRadius",
+    "uClickScale",
     "uCenter",
     "uBrushRotation",
     "uBrushWidth",

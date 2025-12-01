@@ -47,6 +47,13 @@ export function loadWavyTexts(params: LoadWavyTextsParams): Promise<void> {
         onFontLoaded(font);
         if (spiral?.material?.uniforms) {
           const spiralUniforms = spiral.material.uniforms;
+          const wavyRoutes: Record<string, string> = {
+            home: "/home",
+            about: "/about",
+            contacts: "/contacts",
+            resume: "/resume",
+          };
+
           textLabels.forEach((label, index) => {
             const textMesh = createWavyText({
               text: label,
@@ -128,6 +135,13 @@ export function loadWavyTexts(params: LoadWavyTextsParams): Promise<void> {
                 );
 
                 tl.to({}, { duration: 0.75 });
+
+                const targetRoute = wavyRoutes[label.toLowerCase()];
+                if (targetRoute && typeof window !== "undefined") {
+                  window.setTimeout(() => {
+                    window.location.assign(targetRoute);
+                  }, 600);
+                }
               },
               spiralUniforms: {
                 uTime: spiralUniforms.uTime as { value: number },

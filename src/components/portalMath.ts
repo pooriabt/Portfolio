@@ -64,6 +64,15 @@ type Portal = ReturnType<
   typeof import("./createPortalEllipse").createPortalEllipse
 >;
 
+type TogglePortalOptions = {
+  navigateTo?: string;
+  portalGroup?: THREE.Group | null;
+  spiral?: ReturnType<
+    typeof import("./SpiralBackground").createSpiralBackground
+  > | null;
+  side?: "left" | "right";
+};
+
 /**
  * Checks if a portal contains the given intersected object
  */
@@ -123,27 +132,97 @@ export function togglePortal(
   isOpen: boolean,
   setOpen: (v: boolean) => void,
   setAnimating: (v: boolean) => void,
-  animFlag: boolean
+  animFlag: boolean,
+  options?: TogglePortalOptions
 ) {
   if (animFlag) return;
   setAnimating(true);
 
-  const target = isOpen ? 0 : 1;
-  gsap.killTweensOf(portal.uniforms.uSpread);
-  gsap.to(portal.uniforms.uSpread, {
-    value: target,
-    duration: 1.5,
-    ease: "power2.inOut",
+  const targetGroup =
+    options?.portalGroup ??
+    (portal.mesh.parent instanceof THREE.Group
+      ? (portal.mesh.parent as THREE.Group)
+      : null);
+  const scaleTarget = targetGroup ? targetGroup.scale : portal.mesh.scale;
+  const enlargedScale = scaleTarget.clone().multiplyScalar(10);
+  const timeMultiplierUniform = portal.uniforms.uTimeMultiplier;
+  const clickScaleUniform = portal.uniforms.uClickScale;
+  const spiralUniforms = options?.spiral?.material
+    ?.uniforms as Record<string, { value: number }> | undefined;
+  const spiralClickScale =
+    spiralUniforms && options?.side === "left"
+      ? spiralUniforms.uClickScale0
+      : spiralUniforms && options?.side === "right"
+      ? spiralUniforms.uClickScale1
+      : null;
+
+  const timeline = gsap.timeline({
     onComplete: () => {
+      if (timeMultiplierUniform) {
+        timeMultiplierUniform.value = 1;
+      }
+      if (clickScaleUniform) {
+        clickScaleUniform.value = 1;
+      }
+      if (spiralClickScale) {
+        spiralClickScale.value = 1;
+      }
       setOpen(!isOpen);
       setAnimating(false);
+      if (options?.navigateTo) {
+        window.location.assign(options.navigateTo);
+      }
     },
   });
 
-  gsap.fromTo(
-    portal.uniforms.uAlpha,
-    { value: 0.8 },
-    { value: 1.0, duration: 0.4, yoyo: true, repeat: 1 }
+  timeline.add(() => {
+    if (timeMultiplierUniform) {
+      timeMultiplierUniform.value = 2;
+    }
+  }, 0);
+
+  timeline.to({}, { duration: 1 });
+
+  timeline.add(() => {
+    if (timeMultiplierUniform) {
+      timeMultiplierUniform.value = 1;
+    }
+  });
+
+  timeline.to(
+    scaleTarget,
+    {
+      x: enlargedScale.x,
+      y: enlargedScale.y,
+      z: enlargedScale.z,
+      duration: 0.8,
+      ease: "power2.in",
+    },
+    "-=0.2"
   );
+
+  if (clickScaleUniform) {
+    timeline.to(
+      clickScaleUniform,
+      {
+        value: 10,
+        duration: 0.8,
+        ease: "power2.in",
+      },
+      "<"
+    );
+  }
+
+  if (spiralClickScale) {
+    timeline.to(
+      spiralClickScale,
+      {
+        value: 10,
+        duration: 0.8,
+        ease: "power2.in",
+      },
+      "<"
+    );
+  }
 }
 

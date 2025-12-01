@@ -10,7 +10,9 @@ export const spiralBackgroundFragmentShader = /* glsl */ `
   uniform vec2 uCenter0;
   uniform vec2 uCenter1;
     uniform vec2 uHoleRadius;   // now a vec2
-    uniform vec2 uHoleRadiusOuter;
+  uniform vec2 uHoleRadiusOuter;
+  uniform float uClickScale0;
+  uniform float uClickScale1;
   uniform float uSpeed;
   uniform float uBands;
   uniform float uContrast;
@@ -417,18 +419,24 @@ export const spiralBackgroundFragmentShader = /* glsl */ `
     
     // Elliptical holes (independent x/y scaling) - both portals use same size/shape
     // When hole radius is 0, make everything fully visible
-    float holeRadiusMax = max(uHoleRadiusOuter.x, uHoleRadiusOuter.y);
+    float clickScale0 = max(uClickScale0, 0.001);
+    float clickScale1 = max(uClickScale1, 0.001);
+    vec2 scaledOuter0 = uHoleRadiusOuter * clickScale0;
+    vec2 scaledOuter1 = uHoleRadiusOuter * clickScale1;
+    float holeRadiusMax0 = max(scaledOuter0.x, scaledOuter0.y);
+    float holeRadiusMax1 = max(scaledOuter1.x, scaledOuter1.y);
+    float holeRadiusMax = max(holeRadiusMax0, holeRadiusMax1);
     float alpha = 1.0;
     
     if (holeRadiusMax > 0.001) {
     vec2 hp0 = uv - uCenter0;
-      hp0.x /= max(uHoleRadiusOuter.x, 0.001);
-      hp0.y /= max(uHoleRadiusOuter.y, 0.001);
+      hp0.x /= max(scaledOuter0.x, 0.001);
+      hp0.y /= max(scaledOuter0.y, 0.001);
     float outer0 = length(hp0);
     
     vec2 hp1 = uv - uCenter1;
-      hp1.x /= max(uHoleRadiusOuter.x, 0.001);
-      hp1.y /= max(uHoleRadiusOuter.y, 0.001);
+      hp1.x /= max(scaledOuter1.x, 0.001);
+      hp1.y /= max(scaledOuter1.y, 0.001);
     float outer1 = length(hp1);
 
     float outerDist = min(outer0, outer1);

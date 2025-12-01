@@ -38,6 +38,8 @@ export function createSpiralBackground(
     uCenter1: { value: new THREE.Vector2(0.75, 0.5) },
     uHoleRadius: { value: new THREE.Vector2(0.08, 0.08) },
     uHoleRadiusOuter: { value: new THREE.Vector2(0.11, 0.11) },
+    uClickScale0: { value: 1.0 },
+    uClickScale1: { value: 1.0 },
     uSpeed: { value: 0.7 },
     uBands: { value: 10.0 },
     uContrast: { value: 1.0 },
@@ -78,7 +80,7 @@ export function createSpiralBackground(
     // Obstacle rotation in radians (pivots at upper corner)
     uSideTextLeftRotation: { value: -0.2 }, // Rotation for left obstacle (pivot: top-right corner)
     uSideTextRightRotation: { value: 0.2 }, // Rotation for right obstacle (pivot: top-left corner)
-    
+
     // Trapezoid colors and active state
     uTrapezoidColor: { value: new THREE.Color(0x3d3d3d) }, // Color for white ripples inside trapezoid
     uTrapezoidBlackColor: { value: new THREE.Color(0x020003) }, // Color for black ripples inside trapezoid
@@ -110,7 +112,6 @@ export function createSpiralBackground(
 
   // fragment shader: two spirals, holes at centers, black/white bands
   const fragment = spiralBackgroundFragmentShader;
-
 
   const mat = new THREE.ShaderMaterial({
     vertexShader: vertex,
@@ -530,7 +531,6 @@ export function createSpiralBackground(
 
       // Update edge lines
       updateEdgeLines(corners, leftObstacleLines, "left");
-
     } else if (leftObstacleMesh) {
       leftObstacleMesh.visible = false;
       // Hide edge lines
