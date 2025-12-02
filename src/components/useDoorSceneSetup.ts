@@ -81,6 +81,7 @@ type DoorSceneSetupParams = {
   ) => any;
   createTextMaterialHelper: (controls: any) => THREE.MeshStandardMaterial;
   farsifyText: (text: string, rtlPlugin: any) => Promise<string>;
+  onPortalTransition?: (url: string) => void;
 };
 
 export function useDoorSceneSetup({
@@ -105,6 +106,7 @@ export function useDoorSceneSetup({
   createGeometryConfigHelper,
   createTextMaterialHelper,
   farsifyText,
+  onPortalTransition,
 }: DoorSceneSetupParams) {
   const squareBaselineRef = useRef<{
     portalWidthCss: number;
@@ -268,7 +270,7 @@ export function useDoorSceneSetup({
 
     // Create wavy text elements for navigation (home, about, contacts, resume)
     const wavyTexts: THREE.Mesh[] = [];
-    const textLabels = ["home", "about", "contacts", "resume"];
+    const textLabels = ["HOME", "ABOUT", "CONTACTS", "RESUME"];
 
     // Column text elements for left and right columns
     const columnTexts: THREE.Mesh[] = [];
@@ -282,10 +284,10 @@ export function useDoorSceneSetup({
     // Base values for full-screen (will be used in updateSizing)
     const baseTextSize = 0.5; // Full-screen text size
     const baseTextPositions = [
-      { x: -6.9, y: 4, z: -8 }, // Full-screen positions
-      { x: -2.3, y: 4, z: -8 },
-      { x: 2.3, y: 4, z: -8 },
-      { x: 6.9, y: 4, z: -8 },
+      { x: -6.9, y: 3.8, z: -8 }, // Full-screen positions
+      { x: -2.3, y: 3.8, z: -8 },
+      { x: 2.3, y: 3.8, z: -8 },
+      { x: 6.9, y: 3.8, z: -8 },
     ];
 
     // Load font for wavy text (using Montserrat Black Regular)
@@ -322,6 +324,16 @@ export function useDoorSceneSetup({
           portalGroup: leftPortalGroup,
           spiral,
           side: "left",
+          onTransition: (url) => {
+            // Hide other elements to prevent them from showing on top of the scaled portal
+            rightPortalGroup.visible = false;
+            columnTexts.forEach((t) => (t.visible = false));
+            wavyTexts.forEach((t) => (t.visible = false));
+            if (englishMesh) englishMesh.visible = false;
+            if (farsiMesh) farsiMesh.visible = false;
+
+            if (onPortalTransition) onPortalTransition(url);
+          },
         }
       );
     };
@@ -338,6 +350,16 @@ export function useDoorSceneSetup({
           portalGroup: rightPortalGroup,
           spiral,
           side: "right",
+          onTransition: (url) => {
+            // Hide other elements to prevent them from showing on top of the scaled portal
+            leftPortalGroup.visible = false;
+            columnTexts.forEach((t) => (t.visible = false));
+            wavyTexts.forEach((t) => (t.visible = false));
+            if (englishMesh) englishMesh.visible = false;
+            if (farsiMesh) farsiMesh.visible = false;
+
+            if (onPortalTransition) onPortalTransition(url);
+          },
         }
       );
     };

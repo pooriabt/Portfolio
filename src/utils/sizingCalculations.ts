@@ -437,13 +437,13 @@ export function updateSizing(params: UpdateSizingParams) {
 
     let targetTextSize: number;
     if (viewportWidthCss >= 900) {
-      targetTextSize = 0.43;
+      targetTextSize = 0.3;
     } else if (viewportWidthCss > 600 && viewportWidthCss < 900) {
-      targetTextSize = 0.35;
+      targetTextSize = 0.23;
     } else if (viewportWidthCss < 600 && viewportWidthCss > 400) {
-      targetTextSize = 0.27;
+      targetTextSize = 0.17;
     } else {
-      targetTextSize = 0.2;
+      targetTextSize = 0.11;
     }
 
     const sizeScale = targetTextSize / baseTextSize;

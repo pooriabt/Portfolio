@@ -71,6 +71,7 @@ type TogglePortalOptions = {
     typeof import("./SpiralBackground").createSpiralBackground
   > | null;
   side?: "left" | "right";
+  onTransition?: (url: string) => void;
 };
 
 /**
@@ -144,6 +145,7 @@ export function togglePortal(
       ? (portal.mesh.parent as THREE.Group)
       : null);
   const scaleTarget = targetGroup ? targetGroup.scale : portal.mesh.scale;
+  const renderOrderTarget = targetGroup ? targetGroup : portal.mesh;
   const enlargedScale = scaleTarget.clone().multiplyScalar(10);
   const timeMultiplierUniform = portal.uniforms.uTimeMultiplier;
   const clickScaleUniform = portal.uniforms.uClickScale;
@@ -155,22 +157,48 @@ export function togglePortal(
       : spiralUniforms && options?.side === "right"
       ? spiralUniforms.uClickScale1
       : null;
+  
+  const holeFillUniform = portal.uniforms.uHoleFillActive;
 
   const timeline = gsap.timeline({
     onComplete: () => {
-      if (timeMultiplierUniform) {
-        timeMultiplierUniform.value = 1;
+      // Only reset state if we are NOT transitioning to a new page
+      // This prevents the portal from "vanishing" or snapping back before the white fade covers it
+      if (!options?.onTransition) {
+        if (timeMultiplierUniform) {
+          timeMultiplierUniform.value = 1;
+        }
+        if (clickScaleUniform) {
+          clickScaleUniform.value = 1;
+        }
+        if (spiralClickScale) {
+          spiralClickScale.value = 1;
+        }
+        if (holeFillUniform) {
+          holeFillUniform.value = 0;
+        }
+        // Restore depth writing and testing to false
+        if (portal.mat) {
+          portal.mat.depthWrite = false;
+          portal.mat.depthTest = false;
+          portal.mat.needsUpdate = true;
+        }
+        if (portal.brushMesh?.material) {
+          const brushMat = portal.brushMesh.material as THREE.Material;
+          brushMat.depthWrite = false;
+          brushMat.depthTest = false;
+          brushMat.needsUpdate = true;
+        }
+        setOpen(!isOpen);
+        setAnimating(false);
       }
-      if (clickScaleUniform) {
-        clickScaleUniform.value = 1;
-      }
-      if (spiralClickScale) {
-        spiralClickScale.value = 1;
-      }
-      setOpen(!isOpen);
-      setAnimating(false);
+      
       if (options?.navigateTo) {
-        window.location.assign(options.navigateTo);
+        if (options.onTransition) {
+          options.onTransition(options.navigateTo);
+        } else {
+          window.location.assign(options.navigateTo);
+        }
       }
     },
   });
@@ -178,6 +206,28 @@ export function togglePortal(
   timeline.add(() => {
     if (timeMultiplierUniform) {
       timeMultiplierUniform.value = 2;
+    }
+    // Ensure portal renders on top of everything during transition
+    renderOrderTarget.renderOrder = 300;
+    // Also set on children to be safe
+    renderOrderTarget.traverse((child) => {
+      child.renderOrder = 300;
+    });
+    // Activate white hole fill to cover other elements
+    if (holeFillUniform) {
+      holeFillUniform.value = 1.0;
+    }
+    // Enable depth writing AND depth testing so white pixels block objects behind
+    if (portal.mat) {
+      portal.mat.depthWrite = true;
+      portal.mat.depthTest = true;
+      portal.mat.needsUpdate = true;
+    }
+    if (portal.brushMesh?.material) {
+      const brushMat = portal.brushMesh.material as THREE.Material;
+      brushMat.depthWrite = true;
+      brushMat.depthTest = true;
+      brushMat.needsUpdate = true;
     }
   }, 0);
 

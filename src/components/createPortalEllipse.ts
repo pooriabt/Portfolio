@@ -39,6 +39,7 @@ export function createPortalEllipse(params: {
     uBrushOuterScale: { value: params.brushOuterScale ?? 1.2 },
     uBrushPulse: { value: 0.0 }, // Pulsing effect for living organ look (0-1)
     uBrushPulseSpeed: { value: 1.2 }, // Speed of pulse animation
+    uHoleFillActive: { value: 0.0 }, // Fill hole with white during transition (0 = transparent, 1 = white)
   };
 
   const vertex = glsl`
@@ -74,6 +75,7 @@ export function createPortalEllipse(params: {
     uniform float uBrushOuterScale;
     uniform float uBrushPulse;
     uniform float uBrushPulseSpeed;
+    uniform float uHoleFillActive;
     ${
       params.useDigitalRain
         ? glsl`
@@ -182,6 +184,16 @@ export function createPortalEllipse(params: {
 
       // Alpha: create transparent hole when open (uSpread=0), full texture when closed (uSpread=1)
       float outAlpha = baseAlpha * (1.0 - holeMask * (1.0 - uSpread));
+
+      // Fill entire ellipse with white during transition (scales with uClickScale)
+      // Use ellipseDist which is already scaled by uClickScale, so the white fill grows with the portal
+      // White fill goes UNDER the texture - only fill where texture is transparent
+      if (uHoleFillActive > 0.5 && ellipseDist < 1.0) {
+        // Blend white background under the texture
+        // Where texture has alpha, show texture; where transparent, show white
+        outCol = mix(vec3(1.0), outCol, baseAlpha);
+        outAlpha = 1.0; // Fully opaque (white background ensures full coverage)
+      }
 
       // Irregular oil painting brush border - smoothly spinning around ellipse
       // Smooth rotation - use time directly for continuous animation
@@ -371,6 +383,7 @@ export function createPortalEllipse(params: {
     "uBrushOuterScale",
     "uBrushPulse",
     "uBrushPulseSpeed",
+    "uHoleFillActive",
   ] as const;
   sharedUniformKeys.forEach((key) => {
     brushUniforms[key] = uniforms[key];

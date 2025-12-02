@@ -1,6 +1,7 @@
 "use client";
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
+import { gsap } from "gsap";
 import { TextGeometry } from "three/addons/geometries/TextGeometry.js";
 
 import { useDoorSceneSetup } from "./useDoorSceneSetup";
@@ -212,6 +213,27 @@ export default function DoorScene({
   const rtlTextPluginRef = useRef<any>(null);
   const textControls = ENGLISH_TEXT_CONFIG;
   const farsiTextControls = FARSI_TEXT_CONFIG;
+  const [transitionActive, setTransitionActive] = useState(false);
+  const overlayRef = useRef<HTMLDivElement>(null);
+
+  const handlePortalTransition = (url: string) => {
+    setTransitionActive(true);
+    
+    // Fade in the white overlay
+    if (overlayRef.current) {
+      gsap.to(overlayRef.current, {
+        opacity: 1,
+        duration: 1.0,
+        ease: "power2.inOut",
+        onComplete: () => {
+          window.location.assign(url);
+        },
+      });
+    } else {
+      // Fallback if ref is missing
+      window.location.assign(url);
+    }
+  };
 
   useDoorSceneSetup({
     mountRef,
@@ -235,6 +257,7 @@ export default function DoorScene({
     createGeometryConfigHelper,
     createTextMaterialHelper,
     farsifyText,
+    onPortalTransition: handlePortalTransition,
   });
 
   const regenerateGeometry = () => {
@@ -368,6 +391,20 @@ export default function DoorScene({
           height: containerHeight,
           touchAction: "manipulation",
           ...containerStyle,
+        }}
+      />
+      <div
+        ref={overlayRef}
+        style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          width: "100%",
+          height: "100%",
+          backgroundColor: "white",
+          opacity: 0,
+          pointerEvents: transitionActive ? "auto" : "none",
+          zIndex: 300,
         }}
       />
     </>
