@@ -284,10 +284,10 @@ export function useDoorSceneSetup({
     // Base values for full-screen (will be used in updateSizing)
     const baseTextSize = 0.5; // Full-screen text size
     const baseTextPositions = [
-      { x: -6.9, y: 3.8, z: -8 }, // Full-screen positions
-      { x: -2.3, y: 3.8, z: -8 },
-      { x: 2.3, y: 3.8, z: -8 },
-      { x: 6.9, y: 3.8, z: -8 },
+      { x: -6.9, y: 3.9, z: -8 }, // Full-screen positions
+      { x: -2.3, y: 3.9, z: -8 },
+      { x: 2.3, y: 3.9, z: -8 },
+      { x: 6.9, y: 3.9, z: -8 },
     ];
 
     // Load font for wavy text (using Montserrat Black Regular)
