@@ -48,7 +48,7 @@ export function loadWavyTexts(params: LoadWavyTextsParams): Promise<void> {
         if (spiral?.material?.uniforms) {
           const spiralUniforms = spiral.material.uniforms;
           const wavyRoutes: Record<string, string> = {
-            home: "/home",
+            home: "/",
             about: "/about",
             contacts: "/contacts",
             resume: "/resume",
@@ -138,6 +138,14 @@ export function loadWavyTexts(params: LoadWavyTextsParams): Promise<void> {
 
                 const targetRoute = wavyRoutes[label.toLowerCase()];
                 if (targetRoute && typeof window !== "undefined") {
+                  // Skip navigation if already on the target page
+                  const currentPath = window.location.pathname;
+                  const normalizedCurrent = currentPath === "" ? "/" : currentPath;
+                  const normalizedTarget = targetRoute === "" ? "/" : targetRoute;
+                  if (normalizedCurrent === normalizedTarget) {
+                    // Already on this page, don't navigate
+                    return;
+                  }
                   window.setTimeout(() => {
                     window.location.assign(targetRoute);
                   }, 600);

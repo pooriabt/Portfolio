@@ -368,8 +368,75 @@ export function useDoorSceneSetup({
 
     renderer.domElement.style.cursor = "default";
 
+    // Helper to check if point is within mesh bounding box (screen space)
+    const isPointInMeshBounds = (
+      clickX: number,
+      clickY: number,
+      textMesh: THREE.Mesh
+    ): boolean => {
+      const rect = renderer.domElement.getBoundingClientRect();
+      
+      if (!textMesh.geometry.boundingBox) {
+        textMesh.geometry.computeBoundingBox();
+      }
+      const bbox = textMesh.geometry.boundingBox!.clone();
+      bbox.applyMatrix4(textMesh.matrixWorld);
+
+      const corners = [
+        new THREE.Vector3(bbox.min.x, bbox.min.y, bbox.min.z),
+        new THREE.Vector3(bbox.max.x, bbox.min.y, bbox.min.z),
+        new THREE.Vector3(bbox.min.x, bbox.max.y, bbox.min.z),
+        new THREE.Vector3(bbox.max.x, bbox.max.y, bbox.min.z),
+        new THREE.Vector3(bbox.min.x, bbox.min.y, bbox.max.z),
+        new THREE.Vector3(bbox.max.x, bbox.min.y, bbox.max.z),
+        new THREE.Vector3(bbox.min.x, bbox.max.y, bbox.max.z),
+        new THREE.Vector3(bbox.max.x, bbox.max.y, bbox.max.z),
+      ];
+
+      const screenCorners = corners.map((corner) => {
+        const vector = corner.clone();
+        vector.project(camera);
+        return new THREE.Vector2(
+          ((vector.x + 1) / 2) * rect.width + rect.left,
+          ((1 - vector.y) / 2) * rect.height + rect.top
+        );
+      });
+
+      let minX = Infinity,
+        maxX = -Infinity,
+        minY = Infinity,
+        maxY = -Infinity;
+      screenCorners.forEach((corner) => {
+        minX = Math.min(minX, corner.x);
+        maxX = Math.max(maxX, corner.x);
+        minY = Math.min(minY, corner.y);
+        maxY = Math.max(maxY, corner.y);
+      });
+
+      const paddingX = (maxX - minX) * 0.1;
+      const paddingY = (maxY - minY) * 0.1;
+      minX -= paddingX;
+      maxX += paddingX;
+      minY -= paddingY;
+      maxY += paddingY;
+
+      return clickX >= minX && clickX <= maxX && clickY >= minY && clickY <= maxY;
+    };
+
     function onPointerMove(event: PointerEvent) {
       const pointer = getPointerFromEvent(event, renderer);
+      
+      // Check wavy text hover using bounding box
+      for (let i = 0; i < wavyTexts.length; i++) {
+        const textMesh = wavyTexts[i];
+        if (!textMesh.userData.isClickable) continue;
+        
+        if (isPointInMeshBounds(event.clientX, event.clientY, textMesh)) {
+          renderer.domElement.style.cursor = "pointer";
+          return;
+        }
+      }
+      
       const raycaster = new THREE.Raycaster();
       raycaster.setFromCamera(pointer, camera);
       const intersects = raycaster.intersectObjects(
