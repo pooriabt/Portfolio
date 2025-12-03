@@ -467,10 +467,12 @@ export default function WavyNavHeader() {
       }
 
       renderer.domElement.style.cursor = isHovering ? "pointer" : "default";
+      document.body.style.cursor = isHovering ? "pointer" : "auto";
     };
 
-    renderer.domElement.addEventListener("click", handleClick);
-    renderer.domElement.addEventListener("mousemove", handleMouseMove);
+    // Attach listeners to window to capture events even with pointer-events: none on canvas
+    window.addEventListener("click", handleClick);
+    window.addEventListener("mousemove", handleMouseMove);
 
     // Handle resize
     const handleResize = () => {
@@ -486,8 +488,8 @@ export default function WavyNavHeader() {
 
     return () => {
       window.removeEventListener("resize", handleResize);
-      renderer.domElement.removeEventListener("click", handleClick);
-      renderer.domElement.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("click", handleClick);
+      window.removeEventListener("mousemove", handleMouseMove);
       cancelAnimationFrame(rafRef.current);
       meshesRef.current.forEach((mesh) => {
         mesh.geometry.dispose();
@@ -498,18 +500,20 @@ export default function WavyNavHeader() {
       if (container && renderer.domElement.parentElement === container) {
         container.removeChild(renderer.domElement);
       }
+      // Reset cursor
+      document.body.style.cursor = "default";
     };
   }, [pathname, getTargetTextSize]);
 
   return (
     <div
       ref={containerRef}
-      className="fixed top-0 left-0 right-0 bottom-0 z-50 pointer-events-auto"
+      className="fixed top-0 left-0 right-0 bottom-0 z-50 pointer-events-none" // Ensure container is none
       style={{ pointerEvents: "none" }}
     >
       <style jsx>{`
         div :global(canvas) {
-          pointer-events: auto;
+          pointer-events: none; /* Allow clicks to pass through canvas */
         }
       `}</style>
     </div>
