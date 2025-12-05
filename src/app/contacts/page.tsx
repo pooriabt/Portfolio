@@ -419,7 +419,7 @@ function RealisticCloud({
   useEffect(() => {
     // Mark as mounted first to prevent hydration mismatch
     setMounted(true);
-    
+
     const startTime = Date.now();
     const animate = () => {
       const elapsed = (Date.now() - startTime) / 1000;
@@ -505,7 +505,7 @@ function RealisticCloud({
     >
       {!mounted ? (
         // Placeholder for SSR and initial client render to prevent hydration mismatch
-        <div 
+        <div
           className="w-full h-full flex items-center justify-center"
           style={{ minHeight: "220px" }}
         >
@@ -529,169 +529,175 @@ function RealisticCloud({
               // pointerEvents removed to allow SVG to be the hit target
             }}
           >
-          <defs>
-            {/* Gooey filter for smooth merging */}
-            <filter
-              id={`gooey-${contact.id}`}
-              x="-50%"
-              y="-50%"
-              width="200%"
-              height="200%"
-            >
-              <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur" />
-              <feColorMatrix
-                in="blur"
-                mode="matrix"
-                values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 25 -12"
-                result="gooey"
-              />
-            </filter>
+            <defs>
+              {/* Gooey filter for smooth merging */}
+              <filter
+                id={`gooey-${contact.id}`}
+                x="-50%"
+                y="-50%"
+                width="200%"
+                height="200%"
+              >
+                <feGaussianBlur
+                  in="SourceGraphic"
+                  stdDeviation="3"
+                  result="blur"
+                />
+                <feColorMatrix
+                  in="blur"
+                  mode="matrix"
+                  values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 25 -12"
+                  result="gooey"
+                />
+              </filter>
 
-            {/* Inner glow */}
-            <filter
-              id={`inner-glow-${contact.id}`}
-              x="-50%"
-              y="-50%"
-              width="200%"
-              height="200%"
-            >
-              <feGaussianBlur stdDeviation="8" result="blur" />
-              <feComposite
-                in="blur"
-                in2="SourceGraphic"
-                operator="in"
-                result="glow"
-              />
-            </filter>
+              {/* Inner glow */}
+              <filter
+                id={`inner-glow-${contact.id}`}
+                x="-50%"
+                y="-50%"
+                width="200%"
+                height="200%"
+              >
+                <feGaussianBlur stdDeviation="8" result="blur" />
+                <feComposite
+                  in="blur"
+                  in2="SourceGraphic"
+                  operator="in"
+                  result="glow"
+                />
+              </filter>
 
-            {/* Outer glow for hover */}
-            <filter
-              id={`outer-glow-${contact.id}`}
-              x="-100%"
-              y="-100%"
-              width="300%"
-              height="300%"
-            >
-              <feGaussianBlur stdDeviation="7.5" result="blur" />
-            </filter>
+              {/* Outer glow for hover */}
+              <filter
+                id={`outer-glow-${contact.id}`}
+                x="-100%"
+                y="-100%"
+                width="300%"
+                height="300%"
+              >
+                <feGaussianBlur stdDeviation="7.5" result="blur" />
+              </filter>
 
-            {/* Radial gradient for internal lighting */}
-            <radialGradient
-              id={`internal-light-${contact.id}`}
-              cx="50%"
-              cy="30%"
-              r="60%"
-            >
-              <stop
-                offset="0%"
-                stopColor={isHovered ? contact.glowColor : "#ffffff"}
-                stopOpacity="0.4"
-              />
-              <stop offset="100%" stopColor="transparent" stopOpacity="0" />
-            </radialGradient>
-          </defs>
+              {/* Radial gradient for internal lighting */}
+              <radialGradient
+                id={`internal-light-${contact.id}`}
+                cx="50%"
+                cy="30%"
+                r="60%"
+              >
+                <stop
+                  offset="0%"
+                  stopColor={isHovered ? contact.glowColor : "#ffffff"}
+                  stopOpacity="0.4"
+                />
+                <stop offset="100%" stopColor="transparent" stopOpacity="0" />
+              </radialGradient>
+            </defs>
 
-          {/* Background glow - always rendered but opacity changes for performance */}
-          <ellipse
-            cx="125"
-            cy="90"
-            rx="100"
-            ry="63"
-            fill={contact.glowColor}
-            opacity={isHovered ? 0.5 : 0}
-            filter={`url(#outer-glow-${contact.id})`}
-            style={{ transition: "opacity 0.3s ease" }}
-          />
+            {/* Background glow - always rendered but opacity changes for performance */}
+            <ellipse
+              cx="125"
+              cy="90"
+              rx="100"
+              ry="63"
+              fill={contact.glowColor}
+              opacity={isHovered ? 0.5 : 0}
+              filter={`url(#outer-glow-${contact.id})`}
+              style={{ transition: "opacity 0.3s ease" }}
+            />
 
-          {/* Main cloud group with gooey filter */}
-          <g filter={`url(#gooey-${contact.id})`}>
-            {/* Render all cloud layers from back to front */}
-            {cloudLayers.current.map((layer, i) => {
-              const path = generateFluffyBlob(
-                layer.cx,
-                layer.cy,
-                layer.radius,
-                time, // Now we can use time directly since this only renders after mount
-                baseSeed + layer.seedOffset,
-                0.8
-              );
+            {/* Main cloud group with gooey filter */}
+            <g filter={`url(#gooey-${contact.id})`}>
+              {/* Render all cloud layers from back to front */}
+              {cloudLayers.current.map((layer, i) => {
+                const path = generateFluffyBlob(
+                  layer.cx,
+                  layer.cy,
+                  layer.radius,
+                  time, // Now we can use time directly since this only renders after mount
+                  baseSeed + layer.seedOffset,
+                  0.8
+                );
+                return (
+                  <path
+                    key={`layer-${i}`}
+                    d={path}
+                    fill={getColor(layer.colorType, isHovered)}
+                    opacity={layer.opacity}
+                    style={{ transition: "fill 0.5s ease" }}
+                  />
+                );
+              })}
+
+              {/* Floating wisps that separate and rejoin */}
+              {wisps.current.map((wisp, i) => {
+                // Calculate drift position - wisps float away and back
+                const driftCycle = Math.sin(
+                  time * wisp.driftSpeed + wisp.phase
+                );
+                const driftX = wisp.baseX + driftCycle * wisp.driftAmplitude;
+                const driftY =
+                  wisp.baseY +
+                  Math.cos(time * wisp.driftSpeed * 0.7 + wisp.phase) *
+                    wisp.driftAmplitude *
+                    0.5;
+
+                // Opacity fades as wisp drifts away
+                const distanceFromBase = Math.abs(driftCycle);
+                const wispOpacity = 0.9 - distanceFromBase * 0.4;
+
+                const path = generateFluffyBlob(
+                  driftX,
+                  driftY,
+                  wisp.radius + Math.sin(time * 2 + wisp.seed) * 2,
+                  time,
+                  baseSeed + wisp.seed,
+                  1.2
+                );
+
+                return (
+                  <path
+                    key={`wisp-${i}`}
+                    d={path}
+                    fill={getColor("highlight", isHovered)}
+                    opacity={wispOpacity}
+                    style={{ transition: "fill 0.5s ease" }}
+                  />
+                );
+              })}
+            </g>
+
+            {/* Internal lighting effect */}
+            <ellipse
+              cx="125"
+              cy="75"
+              rx="63"
+              ry="44"
+              fill={`url(#internal-light-${contact.id})`}
+              style={{ mixBlendMode: "screen" }}
+            />
+
+            {/* Highlight specks for extra fluffiness */}
+            {[...Array(8)].map((_, i) => {
+              const angle = (i / 8) * Math.PI * 2;
+              const dist = 38 + Math.sin(time * 0.5 + i) * 12;
+              const x = 125 + Math.cos(angle + time * 0.1) * dist;
+              const y = 81 + Math.sin(angle + time * 0.1) * dist * 0.6;
+              const size = 4 + Math.sin(time + i * 2) * 2;
               return (
-                <path
-                  key={`layer-${i}`}
-                  d={path}
-                  fill={getColor(layer.colorType, isHovered)}
-                  opacity={layer.opacity}
+                <circle
+                  key={`speck-${i}`}
+                  cx={x}
+                  cy={y}
+                  r={size}
+                  fill={isHovered ? contact.glowColor : "#ffffff"}
+                  opacity={0.6 + Math.sin(time * 2 + i) * 0.3}
                   style={{ transition: "fill 0.5s ease" }}
                 />
               );
             })}
-
-            {/* Floating wisps that separate and rejoin */}
-            {wisps.current.map((wisp, i) => {
-              // Calculate drift position - wisps float away and back
-              const driftCycle = Math.sin(time * wisp.driftSpeed + wisp.phase);
-              const driftX = wisp.baseX + driftCycle * wisp.driftAmplitude;
-              const driftY =
-                wisp.baseY +
-                Math.cos(time * wisp.driftSpeed * 0.7 + wisp.phase) *
-                  wisp.driftAmplitude *
-                  0.5;
-
-              // Opacity fades as wisp drifts away
-              const distanceFromBase = Math.abs(driftCycle);
-              const wispOpacity = 0.9 - distanceFromBase * 0.4;
-
-              const path = generateFluffyBlob(
-                driftX,
-                driftY,
-                wisp.radius + Math.sin(time * 2 + wisp.seed) * 2,
-                time,
-                baseSeed + wisp.seed,
-                1.2
-              );
-
-              return (
-                <path
-                  key={`wisp-${i}`}
-                  d={path}
-                  fill={getColor("highlight", isHovered)}
-                  opacity={wispOpacity}
-                  style={{ transition: "fill 0.5s ease" }}
-                />
-              );
-            })}
-          </g>
-
-          {/* Internal lighting effect */}
-          <ellipse
-            cx="125"
-            cy="75"
-            rx="63"
-            ry="44"
-            fill={`url(#internal-light-${contact.id})`}
-            style={{ mixBlendMode: "screen" }}
-          />
-
-          {/* Highlight specks for extra fluffiness */}
-          {[...Array(8)].map((_, i) => {
-            const angle = (i / 8) * Math.PI * 2;
-            const dist = 38 + Math.sin(time * 0.5 + i) * 12;
-            const x = 125 + Math.cos(angle + time * 0.1) * dist;
-            const y = 81 + Math.sin(angle + time * 0.1) * dist * 0.6;
-            const size = 4 + Math.sin(time + i * 2) * 2;
-            return (
-              <circle
-                key={`speck-${i}`}
-                cx={x}
-                cy={y}
-                r={size}
-                fill={isHovered ? contact.glowColor : "#ffffff"}
-                opacity={0.6 + Math.sin(time * 2 + i) * 0.3}
-                style={{ transition: "fill 0.5s ease" }}
-              />
-            );
-          })}
-        </svg>
+          </svg>
         </div>
       )}
 
@@ -762,47 +768,54 @@ function RealisticCloud({
 
 export default function ContactsPage() {
   const [radius, setRadius] = useState(180);
+  const [scale, setScale] = useState(1);
+  const [isMobile, setIsMobile] = useState(false);
   const [mounted, setMounted] = useState(false);
   const numContacts = CONTACTS.length;
 
-  // Cloud size estimate (width of cloud SVG)
-  const cloudSize = 200; // Approximate width of cloud in pixels
-  const textAreaWidth = 150; // Approximate width needed for center text (reduced)
-  const textAreaHeight = 150; // Approximate height needed for center text (reduced)
+  // Reference dimensions (what you're happy with at the largest size)
+  const referenceWidth = 1366; // Reference window width for full-size display
+  const baseRadius = 180; // Orbit radius at reference width
+  const baseCloudSize = 200; // Cloud size at reference width
 
   useEffect(() => {
-    const updateRadius = () => {
+    const updateLayout = () => {
       const width = window.innerWidth;
       const height = window.innerHeight;
 
-      // Calculate minimum radius needed:
-      // - Half the text area diagonal + cloud radius + padding
-      const textDiagonal =
-        Math.sqrt(textAreaWidth ** 2 + textAreaHeight ** 2) / 2;
-      const cloudRadius = cloudSize / 2;
-      const padding = 40;
-      const minRadiusNeeded = textDiagonal + cloudRadius + padding;
+      // Calculate scale factor based on window width
+      // At 1920px or wider, scale = 1. Below that, scale decreases proportionally.
+      const widthScale = Math.min(1, width / referenceWidth);
 
-      // Also ensure it fits in viewport
-      const maxRadiusByWidth = width / 2 - cloudRadius - padding;
-      const maxRadiusByHeight = height / 2 - cloudRadius - padding;
-      const maxRadius = Math.min(maxRadiusByWidth, maxRadiusByHeight);
+      // On mobile (< 768px), use a smaller scale to fit the vertical layout
+      if (width < 768) {
+        setIsMobile(true);
+        // Scale more aggressively on mobile - use width as the primary factor
+        const mobileScale = width / referenceWidth;
+        // MOBILE SCALE CONTROLS:
+        // - First number (0.7): MAXIMUM scale on mobile
+        // - Second number (1.5): MINIMUM scale on mobile
+        const currentScale = Math.min(0.7, Math.max(1.5, mobileScale * 2.5));
+        setScale(currentScale);
+        // Make radius responsive - scale it with the current scale
+        setRadius(baseRadius * currentScale);
+        return;
+      }
 
-      // Use the larger of the two requirements, but ensure it's within reasonable bounds
-      // Apply a reduction factor to make the circle smaller
-      const calculatedRadius = Math.max(
-        minRadiusNeeded,
-        Math.min(maxRadius, 280)
-      );
-      // Reduce radius by 20%
-      setRadius(calculatedRadius * 0.7);
+      // For desktop: scale everything proportionally
+      setIsMobile(false);
+      setScale(widthScale);
+      setRadius(baseRadius);
     };
 
-    updateRadius();
-    window.addEventListener("resize", updateRadius);
+    updateLayout();
+    window.addEventListener("resize", updateLayout);
     setMounted(true); // Mark as mounted to avoid hydration mismatch
-    return () => window.removeEventListener("resize", updateRadius);
+    return () => window.removeEventListener("resize", updateLayout);
   }, []);
+
+  // Scaled cloud size for positioning calculations
+  const cloudSize = baseCloudSize;
 
   return (
     <main className="h-screen w-screen bg-black text-white overflow-hidden relative">
@@ -998,21 +1011,21 @@ export default function ContactsPage() {
       <WavyNavHeader />
 
       {/* Main content container */}
-      <div className="relative z-10 h-full w-full">
-        {/* Left side - Description - Aligned with home button */}
-        <div className="absolute left-0 top-0 h-full w-1/2 flex items-start justify-start pl-[5%] md:pl-[6%] lg:pl-[9.5%] pt-[15%] md:pt-[18%]">
-          <div className="max-w-xl">
+      <div className="relative z-10 h-full w-full flex flex-col md:block pt-24 md:pt-0 pb-10 md:pb-0">
+        {/* Left side - Description - Vertically centered on desktop */}
+        <div className="relative w-full flex items-start justify-center px-6 md:px-0 md:absolute md:left-0 md:top-0 md:h-full md:w-1/2 md:flex md:items-center md:justify-start md:pl-[6%] lg:pl-[9.5%] pt-4 md:pt-16">
+          <div className="max-w-xl text-center md:text-left">
             <h1 className="text-3xl md:text-4xl lg:text-7xl font-bold mb-5 bg-gradient-to-r from-[#ff00ff] via-[#00ffff] to-[#ff00ff] bg-clip-text text-transparent m-0">
               Let's Connect
             </h1>
             <div className="space-y-4 text-white/70 text-base md:text-lg leading-relaxed m-0 p-0">
-              <p className="m-0 p-0 text-left" style={{ textIndent: 0 }}>
+              <p className="m-0 p-0" style={{ textIndent: 0 }}>
                 Open to new opportunities and collaborations.
                 <br />
                 Reach out through any platform on the right.
               </p>
               <p
-                className="text-white/50 text-sm md:text-base m-0 p-0 text-left"
+                className="text-white/50 text-sm md:text-base m-0 p-0"
                 style={{ textIndent: 0 }}
               >
                 Available for freelance projects and consulting.
@@ -1026,7 +1039,7 @@ export default function ContactsPage() {
         </div>
 
         {/* Right side - Orbital clouds container */}
-        <div className="absolute right-0 top-0 h-full w-1/2 flex items-center justify-center">
+        <div className="relative mt-10 md:mt-0 h-[360px] sm:h-[420px] w-full md:absolute md:right-0 md:top-0 md:h-full md:w-1/2 flex items-center justify-center">
           {/* Orbital container that rotates - positioned in right half, vertically centered between header and bottom */}
           {/* 
             TO CHANGE CIRCLE CENTER POSITION:
@@ -1038,18 +1051,26 @@ export default function ContactsPage() {
             - Smaller number = faster orbit (e.g., "20s" is faster, "40s" is slower)
             - Also update the counterRotate animation duration to match (currently 30s)
           */}
+          {/* Scale wrapper - applies scale transform separately from rotation */}
           <div
             className="absolute"
             style={{
-              left: "45%", // Center of right half - CHANGE THIS to move circle horizontally
-              top: "55%", // Vertical position - CHANGE THIS to move circle up/down
-              width: "0",
-              height: "0",
-              transform: "translate(-50%, -50%)",
-              animation: "rotateOrbit 50s linear infinite", // CHANGE "30s" to adjust speed (smaller = faster)
-              pointerEvents: "auto", // Allow mouse events to reach clouds
+              // Mobile: center horizontally (50%), Desktop: 45% of right half
+              left: isMobile ? "50%" : "45%",
+              top: "58%", // Vertical position - CHANGE THIS to move circle up/down
+              transform: `translate(-50%, -50%) scale(${scale})`,
+              pointerEvents: "auto",
             }}
           >
+            {/* Rotation container - handles the orbit animation */}
+            <div
+              style={{
+                width: "0",
+                height: "0",
+                animation: "rotateOrbit 50s linear infinite", // CHANGE "50s" to adjust speed (smaller = faster)
+                pointerEvents: "auto",
+              }}
+            >
             {/* Clouds positioned on circumference */}
             {CONTACTS.map((contact, index) => {
               // Calculate initial angle for each cloud (evenly distributed)
@@ -1094,6 +1115,7 @@ export default function ContactsPage() {
                 </div>
               );
             })}
+          </div>
           </div>
         </div>
       </div>
