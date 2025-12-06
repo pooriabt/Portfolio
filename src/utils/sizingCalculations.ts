@@ -407,7 +407,13 @@ export function updateSizing(params: UpdateSizingParams) {
           ? currentPortalMetrics.portalHeightWorld /
             effectiveBaseline.portalHeightWorld
           : 1;
-      const uniformScale = Math.min(widthRatio, heightRatio);
+      let uniformScale = Math.min(widthRatio, heightRatio);
+      
+      // Apply additional scale reduction for small width viewports (mobile)
+      if (isMobileViewport) {
+        uniformScale *= 0.7; // Reduce text scale on mobile
+      }
+      
       textGroupRef.current.scale.setScalar(uniformScale);
     }
   }

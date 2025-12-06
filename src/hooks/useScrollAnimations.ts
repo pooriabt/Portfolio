@@ -30,6 +30,12 @@ export type ScrollAnimationParams = {
   camera: THREE.PerspectiveCamera;
 };
 
+// Mobile scale factor for small viewports
+const getMobileScaleFactor = () => {
+  const viewportWidth = window.innerWidth;
+  return viewportWidth <= 600 ? 0.7 : 1;
+};
+
 export function createScrollTrigger(
   params: ScrollAnimationParams
 ): ScrollTrigger {
@@ -64,7 +70,7 @@ export function createScrollTrigger(
       farsi.rotation.set(0, 0, 0);
     }
     if (textGroupRef.current) {
-      textGroupRef.current.scale.setScalar(1);
+      textGroupRef.current.scale.setScalar(getMobileScaleFactor());
     }
     leftPortalGroup.scale.setScalar(0);
     rightPortalGroup.scale.setScalar(0);
@@ -183,9 +189,9 @@ export function createScrollTrigger(
       }
 
       if (progress >= 0.2) {
-        textGroupRef.current?.scale.setScalar(groupScale);
+        textGroupRef.current?.scale.setScalar(groupScale * getMobileScaleFactor());
       } else {
-        textGroupRef.current?.scale.setScalar(1);
+        textGroupRef.current?.scale.setScalar(getMobileScaleFactor());
       }
 
       const sideTextStartProgress = 0.4;
