@@ -65,7 +65,7 @@ const CONTACTS: ContactItem[] = [
     id: "email",
     name: "Email",
     icon: <MailIcon />,
-    href: "mailto:pooria.tavakoly@gmail.com",
+    href: "https://mail.google.com/mail/?view=cm&to=pooria.tavakoly@gmail.com",
     glowColor: "#ff9999",
     accentColor: "#EA4335",
   },
@@ -1011,9 +1011,9 @@ export default function ContactsPage() {
       <WavyNavHeader />
 
       {/* Main content container */}
-      <div className="relative z-10 h-full w-full flex flex-col md:block pt-24 md:pt-0 pb-10 md:pb-0">
+      <div className="relative z-10 h-full w-full flex flex-col md:block pt-24 md:pt-0 pb-15 md:pb-0">
         {/* Left side - Description - Vertically centered on desktop */}
-        <div className="relative w-full flex items-start justify-center px-6 md:px-0 md:absolute md:left-0 md:top-0 md:h-full md:w-1/2 md:flex md:items-center md:justify-start md:pl-[6%] lg:pl-[9.5%] pt-4 md:pt-16">
+        <div className="relative w-full flex items-start justify-center px-6 md:px-0 md:absolute md:left-0 md:top-0 md:h-full md:w-1/2 md:flex md:items-center md:justify-start md:pl-[6%] lg:pl-[9.5%] pt-10 md:pt-16">
           <div className="max-w-xl text-center md:text-left">
             <h1 className="text-3xl md:text-4xl lg:text-7xl font-bold mb-5 bg-gradient-to-r from-[#ff00ff] via-[#00ffff] to-[#ff00ff] bg-clip-text text-transparent m-0">
               Let's Connect
@@ -1031,7 +1031,7 @@ export default function ContactsPage() {
                 Available for freelance projects and consulting.
               </p>
             </div>
-            <div className="mt-7 flex items-center gap-2">
+            <div className="mt-7 hidden md:flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-[#00ff88] animate-pulse" />
               <span className="text-white/60 text-sm">Currently available</span>
             </div>
@@ -1039,7 +1039,7 @@ export default function ContactsPage() {
         </div>
 
         {/* Right side - Orbital clouds container */}
-        <div className="relative mt-10 md:mt-0 h-[360px] sm:h-[420px] w-full md:absolute md:right-0 md:top-0 md:h-full md:w-1/2 flex items-center justify-center">
+        <div className="relative md:mt-0 h-[360px] sm:h-[420px] w-full md:absolute md:right-0 md:top-0 md:h-full md:w-1/2 flex items-center justify-center">
           {/* Orbital container that rotates - positioned in right half, vertically centered between header and bottom */}
           {/* 
             TO CHANGE CIRCLE CENTER POSITION:
